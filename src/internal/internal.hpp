@@ -2,6 +2,7 @@
 
 #include "detection/detection_result.hpp"
 #include "detection/detector_model.hpp"
+#include "detection/detection_stage.hpp"
 #include "error.hpp"
 #include "frame_pool_allocator.hpp"
 #include "scoped_timer.hpp"

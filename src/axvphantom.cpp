@@ -9,6 +9,7 @@ struct axvp_context_t {
     axvp_config_t config{};
     axvp_policy_t policy = AXVP_POLICY_NONE;
     std::shared_ptr<const axvp::internal::DetectorModel> detector_model{};
+    std::shared_ptr<axvp::internal::DetectionStage> detection_stage{};
 };
 
 namespace {
@@ -52,6 +53,7 @@ status_from_error(axvp::internal::Error error) noexcept {
     case Error::PipelineError:
     case Error::PipelineNotInitialized:
     case Error::PipelineStageFailed:
+    case Error::PipelineDetectionIncomplete:
         return AXVP_STATUS_INTERNAL_ERROR;
     case Error::SecurityError:
     case Error::SecurityModelTampered:
@@ -109,6 +111,19 @@ axvp_context_t *axvp_create(const axvp_config_t *cfg,
 
     context->detector_model = std::make_shared<axvp::internal::DetectorModel>(
         std::move(detector_model.value()));
+
+    auto detection_stage = axvp::internal::DetectionStage::create(
+        *cfg, context->detector_model);
+    if (!detection_stage.has_value()) {
+        if (status != nullptr) {
+            *status = status_from_error(detection_stage.error());
+        }
+        delete context;
+        return nullptr;
+    }
+
+    context->detection_stage = std::make_shared<axvp::internal::DetectionStage>(
+        std::move(detection_stage.value()));
     return context;
 }
 
@@ -138,6 +153,27 @@ axvp_status_t axvp_process_frame(axvp_context_t *ctx, const axvp_frame_t *in,
     out->faces_anonymized = 0U;
     out->anonymization_complete = 0U;
     std::memset(out->reserved, 0, sizeof(out->reserved));
+
+    if (ctx->detection_stage != nullptr && in->data != nullptr &&
+        in->format == AXVP_FMT_BGR && in->width > 0U && in->height > 0U &&
+        in->width >= 2U && in->height >= 2U && in->stride > 0U) {
+        try {
+            const auto image = cv::Mat(
+                static_cast<int>(in->height), static_cast<int>(in->width),
+                CV_8UC3, const_cast<void *>(in->data),
+                static_cast<std::size_t>(in->stride));
+            axvp::internal::UniqueFrame frame{image};
+            const auto detected = ctx->detection_stage->process(frame);
+            if (!detected.has_value()) {
+                return status_from_error(detected.error());
+            }
+
+            out->faces_detected = static_cast<std::uint32_t>(detected->size());
+        } catch (const cv::Exception &) {
+            return AXVP_STATUS_INTERNAL_ERROR;
+        }
+    }
+
     return AXVP_STATUS_OK;
 }
 

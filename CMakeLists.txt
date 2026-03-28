@@ -26,7 +26,7 @@ enable_testing()
 include(FetchContent)
 include(GoogleTest)
 
-find_package(OpenCV REQUIRED COMPONENTS core objdetect dnn)
+find_package(OpenCV REQUIRED COMPONENTS core imgproc imgcodecs objdetect dnn face)
 find_package(OpenSSL REQUIRED)
 find_package(flatbuffers CONFIG QUIET)
 if(NOT TARGET flatbuffers::flatbuffers)

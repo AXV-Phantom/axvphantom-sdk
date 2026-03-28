@@ -20,6 +20,7 @@ enum class Error : std::uint8_t {
     PipelineError = 0x30,
     PipelineNotInitialized,
     PipelineStageFailed,
+    PipelineDetectionIncomplete,
     SecurityError = 0x40,
     SecurityModelTampered,
     SecurityWipeFailed,
@@ -57,6 +58,8 @@ error_message(Error error) noexcept {
         return "pipeline: not initialized";
     case Error::PipelineStageFailed:
         return "pipeline: stage failed";
+    case Error::PipelineDetectionIncomplete:
+        return "pipeline: detection incomplete";
     case Error::SecurityError:
         return "security error";
     case Error::SecurityModelTampered:

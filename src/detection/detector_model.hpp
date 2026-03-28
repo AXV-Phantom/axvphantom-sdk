@@ -21,11 +21,14 @@
 namespace axvp::internal {
 
 inline constexpr std::string_view kDefaultDetectorModelRelativePath =
-    "models/face_detection_yunet/face_detection_yunet_2023mar.onnx";
+    "models/face_detection_yunet/face_detection_yunet_2022mar.onnx";
 inline constexpr std::string_view kDefaultDetectorModelSha256 =
-    "8f2383e4dd3cfbb4553ea8718107fc0423210dc964f9f4280604804ed2552fa4";
-inline constexpr std::uintmax_t kDefaultDetectorModelSize = 232589U;
+    "50ef07f702a31741ca46a4c0d947773b64143b9362780237bf0d427d6c79bab7";
+inline constexpr std::uintmax_t kDefaultDetectorModelSize = 345478U;
 inline const cv::Size kDefaultDetectorInputSize{320, 320};
+inline constexpr float kDefaultDetectorScoreThreshold = 0.60f;
+inline constexpr float kDefaultDetectorNmsThreshold = 0.30f;
+inline constexpr int kDefaultDetectorTopK = 5000;
 
 class DetectorModel final {
   public:
@@ -224,7 +227,9 @@ class DetectorModel final {
     create_detector(const std::filesystem::path &path) noexcept {
         try {
             const auto detector = cv::FaceDetectorYN::create(
-                path.string(), std::string{}, kDefaultDetectorInputSize);
+                path.string(), std::string{}, kDefaultDetectorInputSize,
+                kDefaultDetectorScoreThreshold, kDefaultDetectorNmsThreshold,
+                kDefaultDetectorTopK);
             if (detector == nullptr) {
                 return std::unexpected(Error::ConfigUnsupportedValue);
             }

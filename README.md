@@ -19,7 +19,7 @@ will evolve into the full pipeline described in the project documentation.
 - `axvphantom_tests` is a GoogleTest suite; `axvphantom_bench` remains a placeholder executable.
 - `make lint` checks production sources under `src/` only.
 - `make install` bootstraps Conan dependencies; it does not install the SDK itself.
-- `make install-data` downloads local model assets into `data/`, including all published YuNet variants, and that directory is ignored by git.
+- `make install-data` downloads local model assets into `data/`, including the YuNet 2022mar detector, the face-landmark LBF model, and a small face-image pack for detection-stage tests. The directory is ignored by git.
 
 ## Design goals
 
@@ -50,7 +50,7 @@ make release
 | Command | Description |
 | --- | --- |
 | `make install` | Installs Conan dependencies into `build/conan/<profile>`. |
-| `make install-data` | Downloads model assets into local `data/` folders, including YuNet full/int8/int8bq variants. |
+| `make install-data` | Downloads the compatible YuNet 2022mar detector, the face-landmark model, and face-test images into local `data/` folders. |
 | `make build` | Configures and builds the Debug preset. |
 | `make test` | Builds the Debug preset and runs `ctest --preset debug`. |
 | `make release` | Configures and builds the Release preset. |
@@ -116,4 +116,4 @@ The main tracked files and directories in this repo are:
 - `CHANGELOG.md`
 - `LICENSE`
 - `VERSION`
-- `data/` is a local cache for downloaded models and is ignored by git.
+- `data/` is a local cache for downloaded models and face-test images, and is ignored by git.

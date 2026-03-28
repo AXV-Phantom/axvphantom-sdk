@@ -11,9 +11,12 @@
 #include <fstream>
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
+#include <memory>
 #include <memory_resource>
 #include <opencv2/core.hpp>
+#include <opencv2/imgcodecs.hpp>
 #include <string>
+#include <string_view>
 #include <thread>
 #include <type_traits>
 #include <vector>
@@ -68,6 +71,14 @@ void emit_tick(TickListener &listener, std::uint32_t value) {
     listener.on_tick(value);
 }
 
+[[nodiscard]] std::filesystem::path test_data_path(std::string_view relative) {
+    return std::filesystem::path{AXVP_TEST_DATA_DIR} / relative;
+}
+
+[[nodiscard]] cv::Mat load_test_image(std::string_view relative) {
+    return cv::imread(test_data_path(relative).string(), cv::IMREAD_COLOR);
+}
+
 [[nodiscard]] axvp_config_t make_test_config() {
     axvp_config_t config{};
     config.size = static_cast<std::uint32_t>(sizeof(config));
@@ -81,8 +92,27 @@ void emit_tick(TickListener &listener, std::uint32_t value) {
     return config;
 }
 
+[[nodiscard]] std::shared_ptr<const DetectorModel> make_detector_model() {
+    auto config = make_test_config();
+    auto model = DetectorModel::create(config);
+    EXPECT_TRUE(model.has_value());
+    if (!model.has_value()) {
+        return nullptr;
+    }
+
+    return std::make_shared<DetectorModel>(std::move(model).value());
+}
+
+class FailingLandmarkBackend final : public axvp::internal::LandmarkBackend {
+  public:
+    bool fit(const cv::Mat &, const std::vector<cv::Rect> &,
+             std::vector<std::vector<cv::Point2f>> &) override {
+        return false;
+    }
+};
+
 TEST(ErrorMessages, KnownCodesHaveDescriptions) {
-    const std::array<Error, 18> errors{
+    const std::array<Error, 19> errors{
         Error::Ok,
         Error::ConfigError,
         Error::ConfigMissingValue,
@@ -97,6 +127,7 @@ TEST(ErrorMessages, KnownCodesHaveDescriptions) {
         Error::PipelineError,
         Error::PipelineNotInitialized,
         Error::PipelineStageFailed,
+        Error::PipelineDetectionIncomplete,
         Error::SecurityError,
         Error::SecurityModelTampered,
         Error::SecurityWipeFailed,
@@ -116,6 +147,8 @@ TEST(ErrorMessages, KnownCodesHaveDescriptions) {
               "resource: not found");
     EXPECT_EQ(axvp::internal::error_message(Error::PipelineError),
               "pipeline error");
+    EXPECT_EQ(axvp::internal::error_message(Error::PipelineDetectionIncomplete),
+              "pipeline: detection incomplete");
     EXPECT_EQ(axvp::internal::error_message(Error::SecurityError),
               "security error");
     EXPECT_EQ(axvp::internal::error_message(Error::SecurityModelTampered),
@@ -251,6 +284,155 @@ TEST(DetectionResult, RejectsOverflowAndInvalidLandmarkIndex) {
     EXPECT_EQ(invalid.error(), Error::ConfigInvalidValue);
     EXPECT_TRUE(empty.landmark_x_for(0U).empty());
     EXPECT_TRUE(empty.face_rois().empty());
+}
+
+TEST(DetectionStage, DetectsSingleFaceAndLandmarks) {
+    auto detector_model = make_detector_model();
+    ASSERT_NE(detector_model, nullptr);
+
+    auto stage =
+        axvp::internal::DetectionStage::create(make_test_config(),
+                                               std::move(detector_model));
+    ASSERT_TRUE(stage.has_value())
+        << axvp::internal::error_message(stage.error());
+
+    cv::Mat image = load_test_image(
+        "test-images/face_detection/opencv_extra/gray_face.png");
+    ASSERT_FALSE(image.empty());
+
+    UniqueFrame frame(image);
+    auto result = stage->process(frame);
+    if (!result.has_value()) {
+        std::cerr << "DetectionStage single-face error: "
+                  << axvp::internal::error_message(result.error()) << '\n';
+    }
+    ASSERT_TRUE(result.has_value())
+        << axvp::internal::error_message(result.error());
+    ASSERT_EQ(result->size(), 1U);
+    ASSERT_GE(result->landmark_count(0U), 5U);
+    EXPECT_GT(result->confidence(0U), 0.0f);
+    EXPECT_GE(result->bbox(0U)[0], 0.0f);
+    EXPECT_GE(result->bbox(0U)[1], 0.0f);
+    EXPECT_GT(result->bbox(0U)[2], 0.0f);
+    EXPECT_GT(result->bbox(0U)[3], 0.0f);
+
+    for (std::size_t face_index = 0U; face_index < result->size();
+         ++face_index) {
+        EXPECT_GE(result->landmark_count(face_index), 5U);
+        for (const float x : result->landmark_x_for(face_index)) {
+            EXPECT_GE(x, 0.0f);
+            EXPECT_LE(x, static_cast<float>(image.cols));
+        }
+        for (const float y : result->landmark_y_for(face_index)) {
+            EXPECT_GE(y, 0.0f);
+            EXPECT_LE(y, static_cast<float>(image.rows));
+        }
+    }
+}
+
+TEST(DetectionStage, DetectsMultipleFacesInBenchmarkPack) {
+    auto detector_model = make_detector_model();
+    ASSERT_NE(detector_model, nullptr);
+
+    auto stage =
+        axvp::internal::DetectionStage::create(make_test_config(),
+                                               std::move(detector_model));
+    ASSERT_TRUE(stage.has_value())
+        << axvp::internal::error_message(stage.error());
+
+    cv::Mat image = load_test_image(
+        "test-images/face_detection/opencv_zoo/group.jpg");
+    ASSERT_FALSE(image.empty());
+
+    UniqueFrame frame(image);
+    auto result = stage->process(frame);
+    if (!result.has_value()) {
+        std::cerr << "DetectionStage multi-face error: "
+                  << axvp::internal::error_message(result.error()) << '\n';
+    }
+    ASSERT_TRUE(result.has_value())
+        << axvp::internal::error_message(result.error());
+    EXPECT_GE(result->size(), 2U);
+
+    for (std::size_t face_index = 0U; face_index < result->size();
+         ++face_index) {
+        EXPECT_EQ(result->landmark_count(face_index), 68U);
+        for (const float x : result->landmark_x_for(face_index)) {
+            EXPECT_GE(x, 0.0f);
+            EXPECT_LE(x, static_cast<float>(image.cols));
+        }
+        for (const float y : result->landmark_y_for(face_index)) {
+            EXPECT_GE(y, 0.0f);
+            EXPECT_LE(y, static_cast<float>(image.rows));
+        }
+    }
+}
+
+TEST(DetectionStage, SkipsFacesWhenLandmarksFailWithoutBlockPolicy) {
+    auto detector_model = make_detector_model();
+    ASSERT_NE(detector_model, nullptr);
+
+    auto backend = std::make_shared<FailingLandmarkBackend>();
+    axvp::internal::DetectionStage stage(std::move(detector_model), backend,
+                                         AXVP_POLICY_NONE, {});
+
+    cv::Mat image = load_test_image(
+        "test-images/face_detection/opencv_extra/gray_face.png");
+    ASSERT_FALSE(image.empty());
+
+    UniqueFrame frame(image);
+    auto result = stage.process(frame);
+    if (!result.has_value()) {
+        std::cerr << "DetectionStage fail-policy error: "
+                  << axvp::internal::error_message(result.error()) << '\n';
+    }
+    ASSERT_TRUE(result.has_value());
+    EXPECT_TRUE(result->empty());
+}
+
+TEST(DetectionStage, BlocksOnLandmarkFailureWhenPolicyRequestsIt) {
+    auto detector_model = make_detector_model();
+    ASSERT_NE(detector_model, nullptr);
+
+    auto backend = std::make_shared<FailingLandmarkBackend>();
+    axvp::internal::DetectionStage stage(
+        std::move(detector_model), backend, AXVP_POLICY_BLOCK_ON_FAIL, {});
+
+    cv::Mat image = load_test_image(
+        "test-images/face_detection/opencv_extra/gray_face.png");
+    ASSERT_FALSE(image.empty());
+
+    UniqueFrame frame(image);
+    auto result = stage.process(frame);
+    if (!result.has_value()) {
+        std::cerr << "DetectionStage block-policy error: "
+                  << axvp::internal::error_message(result.error()) << '\n';
+    }
+    ASSERT_FALSE(result.has_value());
+    EXPECT_EQ(result.error(), Error::PipelineDetectionIncomplete);
+}
+
+TEST(DetectionStage, ReturnsEmptyForNegativeImage) {
+    auto detector_model = make_detector_model();
+    ASSERT_NE(detector_model, nullptr);
+
+    auto stage =
+        axvp::internal::DetectionStage::create(make_test_config(),
+                                               std::move(detector_model));
+    ASSERT_TRUE(stage.has_value());
+
+    cv::Mat image = load_test_image(
+        "test-images/face_detection/opencv_extra/dog416.png");
+    ASSERT_FALSE(image.empty());
+
+    UniqueFrame frame(image);
+    auto result = stage->process(frame);
+    if (!result.has_value()) {
+        std::cerr << "DetectionStage negative-image error: "
+                  << axvp::internal::error_message(result.error()) << '\n';
+    }
+    ASSERT_TRUE(result.has_value());
+    EXPECT_TRUE(result->empty());
 }
 
 TEST(SecureBuffer, CopyClearAndMovePreserveContract) {
