@@ -1,66 +1,93 @@
 # AXV Phantom SDK
 
 AXV Phantom SDK is a C++23 library for biometric anonymization and liveness verification in video streams.
-The repository now contains the implemented SDK pipeline, build tooling, tests, benchmark harness, and
-supporting data bootstrap scripts described in the project documentation.
+This repository contains the SDK library, the public C API and C++23 wrapper, build tooling, tests, benchmarks,
+and the data bootstrap scripts described in the project documentation.
 
-## What this repository is for
+## Contents
 
-- Providing a shared library target named `axvphantom`.
-- Keeping the build reproducible with CMake 3.28+, Conan 2, and Ninja.
-- Hosting the future C and C++ wrapper APIs for frame processing.
-- Tracking the implementation plan, testing strategy, and technical design in the docs folder.
+- [Overview](#overview)
+- [Status Snapshot](#status-snapshot)
+- [Design Principles](#design-principles)
+- [Requirements](#requirements)
+- [Quick Start](#quick-start)
+- [Command Reference](#command-reference)
+- [Build Targets](#build-targets)
+- [Presets](#presets)
+- [Conan Profiles](#conan-profiles)
+- [Dependencies](#dependencies)
+- [Documentation](#documentation)
+- [Repository Layout](#repository-layout)
+- [Runtime Data](#runtime-data)
 
-## Current status
+## Overview
 
-- `CMake` is configured for `Ninja`.
-- `CTest` is enabled at the build-system level.
-- `GTest` and `GMock` are wired into the unit-test target.
-- `axvphantom_tests` is a GoogleTest suite; `axvphantom_bench` is a real latency harness for `axvp_process_frame`.
-- `make lint` checks production sources under `src/` only.
-- `make install` bootstraps Conan dependencies; it does not install the SDK itself.
-- `make install-data` downloads local model assets into `data/`, including the YuNet 2022mar detector, the face-landmark LBF model, and a small face-image pack for detection-stage tests. The directory is ignored by git.
-- Sanitizer presets are available for `asan` and `tsan`; they force the CPU backend in test runs to avoid noisy system-runtime false positives.
-- CMake auto-enables SIMD tuning flags when the compiler and host CPU support them: AVX2/AVX-512 on x86 and dotprod/fp16 on EdgeARM-capable ARM builds.
+The project provides a shared library target named `axvphantom` and a reproducible local workflow built around
+CMake 3.28+, Conan 2, Ninja, and a compact Makefile wrapper.
 
-## Design goals
+## Status Snapshot
 
-- No exceptions in the public API.
-- Explicit error handling with `std::expected`.
-- No global mutable state.
-- Zero-copy or low-copy data flow where possible.
-- Sensitive pixel data must be wiped inside the processing call contract.
+| Area | Status |
+| --- | --- |
+| Core pipeline | Implemented end to end across detection, anonymization, liveness, and composition. |
+| Public API | C API and C++23 wrapper are available. |
+| Metadata | FlatBuffers metadata generation and zero-copy `MetadataView` access are implemented. |
+| Tests | Unit, integration smoke, benchmark, and sanitizer coverage are wired in. |
+| Tooling | CMake presets, Conan profiles, Makefile helpers, and data bootstrap scripts are present. |
+| SIMD tuning | Enabled automatically when the compiler and host support the relevant flags. |
 
-## Quick start
+## Design Principles
 
-```bash
-cd axvphantom-sdk
-make install
-make install-data
-make build
-make test
-make lint
-```
+| Principle | Meaning |
+| --- | --- |
+| No exceptions in the public API | Public entry points return explicit status codes. |
+| Explicit error handling | Internal code uses `std::expected` where it improves clarity. |
+| No global mutable state | Resources live inside a context and are torn down deterministically. |
+| Low-copy data flow | Frames and metadata are passed with minimal copying. |
+| Pixel wiping is contractual | Sensitive pixels are wiped as part of the processing flow. |
 
-If you want the optimized build:
+## Requirements
+
+| Tool | Required | Notes |
+| --- | --- | --- |
+| CMake | Yes | Version 3.28 or newer. |
+| Conan | Yes | Conan 2 is used for dependency management. |
+| Ninja | Yes | The default generator used by the presets and Makefile helpers. |
+| `flatc` | Yes | Required for FlatBuffers code generation during configure/build. |
+| C++23 compiler | Yes | Any compiler that can build the project with the selected preset. |
+| `clang-format` | Optional | Needed for `make fmt`. |
+| `clang-tidy` | Optional | Needed for `make lint`. |
+
+If a local GoogleTest package is unavailable, CMake fetches the official `googletest` release automatically.
+
+## Quick Start
+
+1. `cd axvphantom-sdk`
+2. `make install`
+3. `make install-data`
+4. `make build`
+5. `make test`
+6. `make lint`
+
+Optional optimized build:
 
 ```bash
 make release
 ```
 
-For sanitizer validation:
+Sanitizer validation:
 
 ```bash
 ctest --preset asan --output-on-failure
 ctest --preset tsan --output-on-failure
 ```
 
-## Make targets
+## Command Reference
 
-| Command | Description |
+| Command | Purpose |
 | --- | --- |
 | `make install` | Installs Conan dependencies into `build/conan/<profile>`. |
-| `make install-data` | Downloads the compatible YuNet 2022mar detector, the face-landmark model, and face-test images into local `data/` folders. |
+| `make install-data` | Downloads the detector model, the face-landmark model, and face-test images into `data/`. |
 | `make build` | Configures and builds the Debug preset. |
 | `make test` | Builds the Debug preset and runs `ctest --preset debug`. |
 | `make release` | Configures and builds the Release preset. |
@@ -75,61 +102,89 @@ make install CONAN_PROFILE=RelWithDebInfo
 make install CONAN_PROFILE=EdgeARM
 ```
 
-## Build presets
+## Build Targets
 
-The repository ships with these CMake presets:
+| Target | Type | Purpose |
+| --- | --- | --- |
+| `axvphantom` | Shared library | Main SDK library. |
+| `axvphantom_tests` | Executable | GoogleTest unit suite. |
+| `axvphantom_capi_smoke` | Executable | C API integration smoke test. |
+| `axvphantom_bench` | Executable | Latency benchmark for `axvp_process_frame`. |
 
-- `debug`
-- `release`
-- `relwithdebinfo`
-- `edgearm`
-- `lint`
-- `asan`
-- `tsan`
+The default presets enable tests and benchmarks. The `lint` preset disables both so static analysis stays focused
+on production code.
 
-The `lint` preset uses `clang++` and disables tests and benchmarks so static analysis stays focused on production code.
-The `asan` preset enables AddressSanitizer and UBSan, and the `tsan` preset enables ThreadSanitizer.
+## Presets
 
-The normal build presets also probe the compiler for SIMD flags and pass them through to the SDK target when available.
+### CMake configure and build presets
 
-If no local GoogleTest package is available, CMake fetches the official `googletest` release for the test build.
+| Preset | Purpose |
+| --- | --- |
+| `debug` | Development build with Debug flags. |
+| `release` | Optimized release build. |
+| `relwithdebinfo` | Release build with debug symbols. |
+| `edgearm` | ARM edge-device build configuration. |
+| `lint` | Static-analysis configuration using `clang++` and no tests or benchmarks. |
+| `asan` | AddressSanitizer + UBSan configuration. |
+| `tsan` | ThreadSanitizer configuration. |
+
+### CTest presets
+
+| Preset | Purpose |
+| --- | --- |
+| `debug` | Runs the debug test suite. |
+| `release` | Runs tests for the release configuration. |
+| `relwithdebinfo` | Runs tests for the RelWithDebInfo configuration. |
+| `edgearm` | Runs tests for the ARM edge configuration. |
+| `asan` | Runs sanitizer tests with `AXVP_FORCE_CPU_BACKEND=1` and `LSAN_OPTIONS` pointing to `cmake/lsan.supp`. |
+| `tsan` | Runs sanitizer tests with `AXVP_FORCE_CPU_BACKEND=1` and `TSAN_OPTIONS=ignore_noninstrumented_modules=1`. |
+
+The normal build presets probe the compiler for SIMD flags and pass them through to the SDK target when available.
+
+## Conan Profiles
+
+| Profile | Intended use |
+| --- | --- |
+| `Release` | Default dependency install profile. |
+| `Debug` | Development dependency install profile. |
+| `RelWithDebInfo` | Release-like profile with symbols. |
+| `EdgeARM` | ARM edge-device dependency profile. |
 
 ## Dependencies
 
-Dependencies are managed through Conan 2 and currently include:
+| Dependency | Role |
+| --- | --- |
+| OpenCV | Image processing, detection, liveness, and fallback processing. |
+| FlatBuffers | Metadata serialization. |
+| FFmpeg | Media stack and codec-related support. |
+| liburing | Async I/O support. |
+| Vulkan Loader | GPU anonymization path. |
+| OpenSSL | HMAC and crypto primitives. |
 
-- OpenCV
-- FlatBuffers
-- FFmpeg
-- liburing
-- Vulkan Loader
-- OpenSSL
+Test support uses GoogleTest and GoogleMock. If they are not installed locally, CMake fetches them.
 
-The Conan configuration is intentionally trimmed to keep the graph headless and avoid GUI-specific system packages.
+## Repository Layout
 
-## Documentation
+| Path | Purpose |
+| --- | --- |
+| `CMakeLists.txt` | Main build definition. |
+| `CMakePresets.json` | Configure, build, and test presets. |
+| `Makefile` | Shortcuts for install, build, test, lint, and formatting. |
+| `conanfile.py` | Conan package definition and dependency graph. |
+| `conan/profiles/` | Conan host profiles for local development and release builds. |
+| `include/axvphantom/` | Public C and C++ headers. |
+| `src/` | Library implementation. |
+| `schema/` | FlatBuffers schema files. |
+| `tests/unit/` | Unit tests. |
+| `tests/integration/` | Integration tests, including the C API smoke test. |
+| `tests/bench/` | Benchmark sources. |
+| `scripts/install-data.sh` | Bootstrap script for local model and image assets. |
+| `cmake/lsan.supp` | Narrow LSan suppression file for known external runtime noise. |
+| `data/` | Local cache for downloaded model and image assets. |
+| `CHANGELOG.md` | Release and implementation notes. |
+| `VERSION` | SDK version string. |
 
-- [Documentation index](../docs/README.md)
-- [Technical document](../docs/AXPhantom_SDK_TechDoc.md)
-- [Implementation plan](../docs/AXPhantom_SDK_ImplPlan.md)
-- [Testing appendix](../docs/AXPhantom_SDK_TestingAppendix.md)
-- [Project knowledge base](../docs/AXPhantom_Project_Knowledge.md)
+## Runtime Data
 
-## Repository layout
-
-The main tracked files and directories in this repo are:
-
-- `CMakeLists.txt`
-- `CMakePresets.json`
-- `Makefile`
-- `conanfile.py`
-- `conan/profiles/`
-- `src/`
-- `schema/`
-- `tests/unit/`
-- `tests/bench/`
-- `CHANGELOG.md`
-- `LICENSE`
-- `VERSION`
-- `cmake/lsan.supp` contains a narrow sanitizer suppression for a known external runtime leak.
-- `data/` is a local cache for downloaded models and face-test images, and is ignored by git.
+`data/` is not tracked by git. `make install-data` populates it with the detector model, the face-landmark model,
+and test image assets used by the SDK and its tests.

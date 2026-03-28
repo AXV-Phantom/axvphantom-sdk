@@ -559,6 +559,91 @@ TEST(UniqueFrame, ClonesInputAndWipesOnDemand) {
     EXPECT_EQ(moved.byte_size(), 6U);
 }
 
+TEST(AnonymizationStage, AppliesOvalBlurToFaceRegion) {
+    auto vulkan_context = axvp::internal::VulkanContext::create(make_test_config());
+    ASSERT_TRUE(vulkan_context.has_value())
+        << axvp::internal::error_message(vulkan_context.error());
+
+    auto stage = axvp::internal::AnonymizationStage::create(*vulkan_context,
+                                                            AXVP_POLICY_NONE);
+    ASSERT_TRUE(stage.has_value())
+        << axvp::internal::error_message(stage.error());
+
+    cv::Mat image(256, 256, CV_8UC3, cv::Scalar(24, 24, 24));
+    DetectionResult detection;
+    auto face = detection.add_face({72.0f, 60.0f, 96.0f, 112.0f}, 0.99f);
+    ASSERT_TRUE(face.has_value());
+
+    const auto bbox = detection.bbox(0U);
+    const float pad_x = std::max(10.0f, bbox[2] * 0.18f);
+    const float pad_y = std::max(14.0f, bbox[3] * 0.26f);
+    const int left = std::max(0, static_cast<int>(std::floor(bbox[0] - pad_x)));
+    const int top = std::max(0, static_cast<int>(std::floor(bbox[1] - pad_y)));
+    const int right = std::min(
+        image.cols, static_cast<int>(std::ceil(bbox[0] + bbox[2] + pad_x)));
+    const int bottom = std::min(
+        image.rows, static_cast<int>(std::ceil(bbox[1] + bbox[3] + pad_y)));
+    const cv::Rect roi{left, top, right - left, bottom - top};
+    ASSERT_GT(roi.width, 0);
+    ASSERT_GT(roi.height, 0);
+
+    for (int y = roi.y; y < roi.y + roi.height; ++y) {
+        for (int x = roi.x; x < roi.x + roi.width; ++x) {
+            const bool checker = (((x - roi.x) / 4 + (y - roi.y) / 4) % 2) == 0;
+            image.at<cv::Vec3b>(y, x) =
+                checker ? cv::Vec3b{18, 18, 18} : cv::Vec3b{240, 240, 240};
+        }
+    }
+
+    const cv::Rect center_patch{
+        roi.x + roi.width / 2 - 8, roi.y + roi.height / 2 - 8, 16, 16};
+    const cv::Rect corner_patch{roi.x, roi.y, 16, 16};
+    const cv::Rect center_local{center_patch.x - roi.x, center_patch.y - roi.y,
+                                center_patch.width, center_patch.height};
+    const cv::Rect corner_local{corner_patch.x - roi.x, corner_patch.y - roi.y,
+                                corner_patch.width, corner_patch.height};
+    const cv::Rect control{0, 0, 16, 16};
+    const cv::Mat before_center = image(center_patch).clone();
+    const cv::Mat before_corner = image(corner_patch).clone();
+    const cv::Mat before_control = image(control).clone();
+
+    UniqueFrame frame(image);
+    ASSERT_TRUE(frame.has_value());
+
+    auto result = stage->process(frame, detection);
+    ASSERT_TRUE(result.has_value())
+        << axvp::internal::error_message(result.error());
+    ASSERT_EQ(result->size(), 1U);
+    ASSERT_TRUE(result->face_records()[0].pixels_wiped);
+
+    const cv::Mat anonymized = frame.mat()(roi);
+    EXPECT_GT(cv::norm(before_center, anonymized(center_local), cv::NORM_L1), 0.0);
+    EXPECT_EQ(cv::norm(before_corner, anonymized(corner_local), cv::NORM_INF), 0.0);
+
+    cv::Mat gray;
+    cv::Mat center = anonymized(center_local);
+    cv::cvtColor(center, gray, cv::COLOR_BGR2GRAY);
+    cv::Mat edges;
+    cv::Canny(gray, edges, 50, 150);
+    const int edge_pixels_after = cv::countNonZero(edges);
+
+    cv::Mat before_gray;
+    cv::Mat before_center_gray;
+    cv::cvtColor(before_center, before_center_gray, cv::COLOR_BGR2GRAY);
+    cv::Mat before_edges;
+    cv::Canny(before_center_gray, before_edges, 50, 150);
+    const int edge_pixels_before = cv::countNonZero(before_edges);
+    EXPECT_GT(edge_pixels_before, 0);
+    EXPECT_LT(edge_pixels_after, edge_pixels_before / 6 + 1);
+
+    cv::Scalar mean{};
+    cv::Scalar stddev{};
+    cv::meanStdDev(center, mean, stddev);
+    EXPECT_LT(stddev[0] + stddev[1] + stddev[2], 40.0);
+
+    EXPECT_EQ(cv::norm(before_control, frame.mat()(control), cv::NORM_INF), 0.0);
+}
+
 TEST(GMockIntegration, MockCallIsObserved) {
     testing::StrictMock<MockTickListener> listener;
     EXPECT_CALL(listener, on_tick(42U));
