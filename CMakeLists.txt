@@ -26,7 +26,8 @@ enable_testing()
 include(FetchContent)
 include(GoogleTest)
 
-find_package(OpenCV REQUIRED COMPONENTS core)
+find_package(OpenCV REQUIRED COMPONENTS core objdetect dnn)
+find_package(OpenSSL REQUIRED)
 find_package(flatbuffers CONFIG QUIET)
 if(NOT TARGET flatbuffers::flatbuffers)
     find_path(AXVP_FLATBUFFERS_INCLUDE_DIR NAMES flatbuffers/flatbuffers.h REQUIRED)
@@ -69,7 +70,7 @@ target_include_directories(axvphantom
     PRIVATE
         ${PROJECT_SOURCE_DIR}/src
 )
-target_link_libraries(axvphantom PUBLIC ${OpenCV_LIBS} flatbuffers::flatbuffers)
+target_link_libraries(axvphantom PUBLIC ${OpenCV_LIBS} flatbuffers::flatbuffers OpenSSL::Crypto)
 
 target_compile_definitions(axvphantom
     PUBLIC
@@ -116,12 +117,18 @@ if(AXVP_BUILD_TESTS AND BUILD_TESTING)
     add_executable(axvphantom_tests tests/unit/main.cpp)
     target_compile_features(axvphantom_tests PRIVATE cxx_std_23)
     target_include_directories(axvphantom_tests PRIVATE ${PROJECT_SOURCE_DIR}/src)
+    target_compile_definitions(axvphantom_tests PRIVATE
+        AXVP_TEST_DATA_DIR="${PROJECT_SOURCE_DIR}/data"
+    )
     target_link_libraries(axvphantom_tests PRIVATE axvphantom GTest::gmock_main)
     gtest_discover_tests(axvphantom_tests)
 
     add_executable(axvphantom_capi_smoke tests/integration/api/main.c)
     target_compile_features(axvphantom_capi_smoke PRIVATE c_std_99)
     target_include_directories(axvphantom_capi_smoke PRIVATE ${PROJECT_SOURCE_DIR}/include)
+    target_compile_definitions(axvphantom_capi_smoke PRIVATE
+        AXVP_TEST_DATA_DIR="${PROJECT_SOURCE_DIR}/data"
+    )
     target_link_libraries(axvphantom_capi_smoke PRIVATE axvphantom)
     set_target_properties(axvphantom_capi_smoke PROPERTIES
         C_STANDARD 99

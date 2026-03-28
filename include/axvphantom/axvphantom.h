@@ -19,6 +19,7 @@ typedef enum axvp_status_t {
     AXVP_STATUS_NOT_INITIALIZED = 4,
     AXVP_STATUS_UNSUPPORTED = 5,
     AXVP_STATUS_INTERNAL_ERROR = 6,
+    AXVP_STATUS_SECURITY_ERROR = 7,
 } axvp_status_t;
 
 typedef enum axvp_policy_t {
@@ -50,6 +51,14 @@ typedef struct axvp_config_t {
     uint32_t
         rppg_window_frames; /**< Number of frames in the liveness window. */
     const char *model_dir;  /**< UTF-8 path to the model directory, or NULL. */
+    const char *detector_model_path; /**< UTF-8 path to the YuNet model file, or
+                                        NULL for the default file under
+                                        `model_dir`. */
+    const char *detector_model_sha256; /**< Lowercase SHA-256 checksum for the
+                                          detector model, or NULL for the
+                                          built-in default checksum. */
+    size_t detector_model_size; /**< Expected detector model size in bytes, or
+                                   0 to use the built-in default size. */
     uint64_t reserved[8]; /**< Reserved for future ABI extensions; zero-fill. */
 } axvp_config_t;
 

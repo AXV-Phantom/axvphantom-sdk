@@ -3,6 +3,10 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#ifndef AXVP_TEST_DATA_DIR
+#define AXVP_TEST_DATA_DIR "."
+#endif
+
 #define CHECK(expr)                                                             \
     do {                                                                        \
         if (!(expr)) {                                                          \
@@ -18,6 +22,7 @@ int main(void) {
 
     CHECK(AXVP_STATUS_OK == 0);
     CHECK(AXVP_STATUS_INVALID_ARGUMENT == 1);
+    CHECK(AXVP_STATUS_SECURITY_ERROR == 7);
     CHECK(AXVP_FMT_BGR == 1);
     CHECK(AXVP_POLICY_BLOCK_ON_FAIL == (1u << 0));
     CHECK(AXVP_POLICY_BLUR_FALLBACK == (1u << 1));
@@ -30,7 +35,7 @@ int main(void) {
     config.policy = AXVP_POLICY_NONE;
     config.device_index = 0U;
     config.rppg_window_frames = 4U;
-    config.model_dir = ".";
+    config.model_dir = AXVP_TEST_DATA_DIR;
 
     axvp_status_t status = AXVP_STATUS_INTERNAL_ERROR;
     axvp_context_t *ctx = axvp_create(&config, &status);

@@ -12,6 +12,7 @@ enum class Error : std::uint8_t {
     ConfigInvalidValue,
     ConfigUnsupportedValue,
     ResourceError = 0x20,
+    ResourceNotFound,
     ResourceAllocationFailed,
     ResourceExhausted,
     ResourceLockFailed,
@@ -20,6 +21,7 @@ enum class Error : std::uint8_t {
     PipelineNotInitialized,
     PipelineStageFailed,
     SecurityError = 0x40,
+    SecurityModelTampered,
     SecurityWipeFailed,
     SecurityIntegrityViolation,
 };
@@ -39,6 +41,8 @@ error_message(Error error) noexcept {
         return "config: unsupported value";
     case Error::ResourceError:
         return "resource error";
+    case Error::ResourceNotFound:
+        return "resource: not found";
     case Error::ResourceAllocationFailed:
         return "resource: allocation failed";
     case Error::ResourceExhausted:
@@ -55,6 +59,8 @@ error_message(Error error) noexcept {
         return "pipeline: stage failed";
     case Error::SecurityError:
         return "security error";
+    case Error::SecurityModelTampered:
+        return "security: model tampered";
     case Error::SecurityWipeFailed:
         return "security: wipe failed";
     case Error::SecurityIntegrityViolation:

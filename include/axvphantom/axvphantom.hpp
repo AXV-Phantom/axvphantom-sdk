@@ -9,8 +9,8 @@
 #include <expected>
 #include <opencv2/core.hpp>
 #include <span>
-#include <type_traits>
 #include <string_view>
+#include <type_traits>
 #include <utility>
 
 inline constexpr axvp_policy_t operator|(axvp_policy_t lhs,

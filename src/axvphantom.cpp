@@ -8,6 +8,7 @@
 struct axvp_context_t {
     axvp_config_t config{};
     axvp_policy_t policy = AXVP_POLICY_NONE;
+    std::shared_ptr<const axvp::internal::DetectorModel> detector_model{};
 };
 
 namespace {
@@ -26,6 +27,40 @@ namespace {
     }
 
     return AXVP_STATUS_INVALID_ARGUMENT;
+}
+
+[[nodiscard]] axvp_status_t
+status_from_error(axvp::internal::Error error) noexcept {
+    using axvp::internal::Error;
+
+    switch (error) {
+    case Error::Ok:
+        return AXVP_STATUS_OK;
+    case Error::ConfigError:
+    case Error::ConfigMissingValue:
+    case Error::ConfigInvalidValue:
+    case Error::ResourceError:
+    case Error::ResourceNotFound:
+        return AXVP_STATUS_INVALID_CONFIG;
+    case Error::ConfigUnsupportedValue:
+        return AXVP_STATUS_UNSUPPORTED;
+    case Error::ResourceAllocationFailed:
+    case Error::ResourceExhausted:
+    case Error::ResourceLockFailed:
+    case Error::ResourceUnlockFailed:
+        return AXVP_STATUS_OUT_OF_MEMORY;
+    case Error::PipelineError:
+    case Error::PipelineNotInitialized:
+    case Error::PipelineStageFailed:
+        return AXVP_STATUS_INTERNAL_ERROR;
+    case Error::SecurityError:
+    case Error::SecurityModelTampered:
+    case Error::SecurityWipeFailed:
+    case Error::SecurityIntegrityViolation:
+        return AXVP_STATUS_SECURITY_ERROR;
+    }
+
+    return AXVP_STATUS_INTERNAL_ERROR;
 }
 
 } // namespace
@@ -62,6 +97,18 @@ axvp_context_t *axvp_create(const axvp_config_t *cfg,
 
     context->config = *cfg;
     context->policy = cfg->policy;
+
+    auto detector_model = axvp::internal::DetectorModel::create(*cfg);
+    if (!detector_model.has_value()) {
+        if (status != nullptr) {
+            *status = status_from_error(detector_model.error());
+        }
+        delete context;
+        return nullptr;
+    }
+
+    context->detector_model = std::make_shared<axvp::internal::DetectorModel>(
+        std::move(detector_model.value()));
     return context;
 }
 

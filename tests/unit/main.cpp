@@ -7,10 +7,13 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
+#include <filesystem>
+#include <fstream>
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
 #include <memory_resource>
 #include <opencv2/core.hpp>
+#include <string>
 #include <thread>
 #include <type_traits>
 #include <vector>
@@ -19,6 +22,7 @@
 
 namespace {
 
+using axvp::internal::DetectorModel;
 using axvp::internal::Error;
 using axvp::internal::FramePoolAllocator;
 using axvp::internal::ScopedTimer;
@@ -29,6 +33,8 @@ static_assert(!std::is_copy_constructible_v<SecureBuffer>);
 static_assert(!std::is_copy_assignable_v<SecureBuffer>);
 static_assert(!std::is_copy_constructible_v<UniqueFrame>);
 static_assert(!std::is_copy_assignable_v<UniqueFrame>);
+static_assert(!std::is_copy_constructible_v<DetectorModel>);
+static_assert(!std::is_copy_assignable_v<DetectorModel>);
 static_assert(!std::is_copy_constructible_v<axvp::Context>);
 static_assert(!std::is_copy_assignable_v<axvp::Context>);
 static_assert(std::is_move_constructible_v<axvp::Context>);
@@ -40,6 +46,10 @@ static_assert(std::is_copy_assignable_v<axvp::Frame>);
 static_assert(std::is_copy_constructible_v<axvp::MetadataView>);
 static_assert(std::is_copy_assignable_v<axvp::MetadataView>);
 static_assert(std::is_move_constructible_v<axvp::MetadataView>);
+
+#ifndef AXVP_TEST_DATA_DIR
+#define AXVP_TEST_DATA_DIR "."
+#endif
 
 class TickListener {
   public:
@@ -56,14 +66,28 @@ void emit_tick(TickListener &listener, std::uint32_t value) {
     listener.on_tick(value);
 }
 
+[[nodiscard]] axvp_config_t make_test_config() {
+    axvp_config_t config{};
+    config.size = static_cast<std::uint32_t>(sizeof(config));
+    config.width = 1U;
+    config.height = 1U;
+    config.format = AXVP_FMT_BGR;
+    config.policy = AXVP_POLICY_NONE;
+    config.device_index = 0U;
+    config.rppg_window_frames = 4U;
+    config.model_dir = AXVP_TEST_DATA_DIR;
+    return config;
+}
+
 TEST(ErrorMessages, KnownCodesHaveDescriptions) {
-    const std::array<Error, 16> errors{
+    const std::array<Error, 18> errors{
         Error::Ok,
         Error::ConfigError,
         Error::ConfigMissingValue,
         Error::ConfigInvalidValue,
         Error::ConfigUnsupportedValue,
         Error::ResourceError,
+        Error::ResourceNotFound,
         Error::ResourceAllocationFailed,
         Error::ResourceExhausted,
         Error::ResourceLockFailed,
@@ -72,6 +96,7 @@ TEST(ErrorMessages, KnownCodesHaveDescriptions) {
         Error::PipelineNotInitialized,
         Error::PipelineStageFailed,
         Error::SecurityError,
+        Error::SecurityModelTampered,
         Error::SecurityWipeFailed,
         Error::SecurityIntegrityViolation,
     };
@@ -85,10 +110,77 @@ TEST(ErrorMessages, KnownCodesHaveDescriptions) {
               "config error");
     EXPECT_EQ(axvp::internal::error_message(Error::ResourceError),
               "resource error");
+    EXPECT_EQ(axvp::internal::error_message(Error::ResourceNotFound),
+              "resource: not found");
     EXPECT_EQ(axvp::internal::error_message(Error::PipelineError),
               "pipeline error");
     EXPECT_EQ(axvp::internal::error_message(Error::SecurityError),
               "security error");
+    EXPECT_EQ(axvp::internal::error_message(Error::SecurityModelTampered),
+              "security: model tampered");
+}
+
+TEST(DetectorModel, LoadsDefaultYuNetModelFromDataDir) {
+    auto config = make_test_config();
+
+    auto model = DetectorModel::create(config);
+    ASSERT_TRUE(model.has_value());
+    EXPECT_NE(model->detector(), nullptr);
+    EXPECT_EQ(model->model_size(), axvp::internal::kDefaultDetectorModelSize);
+    EXPECT_EQ(model->checksum(), axvp::internal::kDefaultDetectorModelSha256);
+    EXPECT_FALSE(model->model_path().empty());
+    EXPECT_EQ(model->detector()->getInputSize(), cv::Size(320, 320));
+}
+
+TEST(DetectorModel, RejectsMissingModelPath) {
+    auto config = make_test_config();
+    std::string expected_sha256(axvp::internal::kDefaultDetectorModelSha256);
+    config.detector_model_path = "models/face_detection_yunet/missing.onnx";
+    config.detector_model_size = axvp::internal::kDefaultDetectorModelSize;
+    config.detector_model_sha256 = expected_sha256.c_str();
+
+    auto model = DetectorModel::create(config);
+    ASSERT_FALSE(model.has_value());
+    EXPECT_EQ(model.error(), Error::ResourceNotFound);
+}
+
+TEST(DetectorModel, RejectsTamperedModelFile) {
+    const std::filesystem::path temp_dir =
+        std::filesystem::temp_directory_path() / "axvphantom-detector-model";
+    std::filesystem::create_directories(temp_dir);
+
+    const std::filesystem::path source =
+        std::filesystem::path{AXVP_TEST_DATA_DIR} /
+        axvp::internal::kDefaultDetectorModelRelativePath;
+    const std::filesystem::path copy =
+        temp_dir / "face_detection_yunet_2023mar.onnx";
+
+    std::filesystem::copy_file(
+        source, copy, std::filesystem::copy_options::overwrite_existing);
+
+    std::fstream file(copy, std::ios::binary | std::ios::in | std::ios::out);
+    ASSERT_TRUE(file.is_open());
+    char byte = 0;
+    file.read(&byte, 1);
+    ASSERT_EQ(file.gcount(), 1);
+    byte ^= 0x01;
+    file.seekp(0);
+    file.write(&byte, 1);
+    file.flush();
+
+    std::string copy_path = copy.string();
+    std::string expected_sha256(axvp::internal::kDefaultDetectorModelSha256);
+
+    auto config = make_test_config();
+    config.detector_model_path = copy_path.c_str();
+    config.detector_model_size = axvp::internal::kDefaultDetectorModelSize;
+    config.detector_model_sha256 = expected_sha256.c_str();
+
+    auto model = DetectorModel::create(config);
+    ASSERT_FALSE(model.has_value());
+    EXPECT_EQ(model.error(), Error::SecurityModelTampered);
+
+    std::filesystem::remove_all(temp_dir);
 }
 
 TEST(SecureBuffer, CopyClearAndMovePreserveContract) {
@@ -194,14 +286,7 @@ TEST(GMockIntegration, MockCallIsObserved) {
 
 TEST(CppWrapper, ThinLifecycleAndRoundtripWork) {
     axvp_config_t config{};
-    config.size = static_cast<std::uint32_t>(sizeof(config));
-    config.width = 1U;
-    config.height = 1U;
-    config.format = AXVP_FMT_BGR;
-    config.policy = AXVP_POLICY_NONE;
-    config.device_index = 0U;
-    config.rppg_window_frames = 4U;
-    config.model_dir = ".";
+    config = make_test_config();
 
     auto context = axvp::Context::create(config);
     ASSERT_TRUE(context.has_value());
@@ -262,9 +347,9 @@ TEST(MetadataView, ReadsFlatBufferWithoutCopying) {
 
     const auto version = builder.CreateString("2.3.0");
     const auto faces_offset = builder.CreateVectorOfStructs(faces);
-    const auto root = axvp::fb::CreateFrameMetadata(
-        builder, 1234U, 987654321ULL, version, faces_offset, 1U, 1U, true,
-        321U);
+    const auto root =
+        axvp::fb::CreateFrameMetadata(builder, 1234U, 987654321ULL, version,
+                                      faces_offset, 1U, 1U, true, 321U);
     axvp::fb::FinishFrameMetadataBuffer(builder, root);
 
     auto detached = builder.Release();
