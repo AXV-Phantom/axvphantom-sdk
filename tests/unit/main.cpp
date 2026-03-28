@@ -22,6 +22,7 @@
 
 namespace {
 
+using axvp::internal::DetectionResult;
 using axvp::internal::DetectorModel;
 using axvp::internal::Error;
 using axvp::internal::FramePoolAllocator;
@@ -35,6 +36,7 @@ static_assert(!std::is_copy_constructible_v<UniqueFrame>);
 static_assert(!std::is_copy_assignable_v<UniqueFrame>);
 static_assert(!std::is_copy_constructible_v<DetectorModel>);
 static_assert(!std::is_copy_assignable_v<DetectorModel>);
+static_assert(DetectionResult::max_faces() == axvp::internal::AXVP_MAX_FACES);
 static_assert(!std::is_copy_constructible_v<axvp::Context>);
 static_assert(!std::is_copy_assignable_v<axvp::Context>);
 static_assert(std::is_move_constructible_v<axvp::Context>);
@@ -181,6 +183,74 @@ TEST(DetectorModel, RejectsTamperedModelFile) {
     EXPECT_EQ(model.error(), Error::SecurityModelTampered);
 
     std::filesystem::remove_all(temp_dir);
+}
+
+TEST(DetectionResult, StoresFacesInSoAAndTracksLandmarks) {
+    DetectionResult result;
+    EXPECT_TRUE(result.empty());
+    EXPECT_FALSE(result.full());
+    EXPECT_EQ(result.size(), 0U);
+
+    auto face0 = result.add_face({10.0f, 20.0f, 30.0f, 40.0f}, 0.95f);
+    ASSERT_TRUE(face0.has_value());
+    EXPECT_EQ((*face0)->index, 0U);
+    EXPECT_FLOAT_EQ((*face0)->bbox[0], 10.0f);
+    EXPECT_FLOAT_EQ((*face0)->bbox[1], 20.0f);
+    EXPECT_FLOAT_EQ((*face0)->bbox[2], 30.0f);
+    EXPECT_FLOAT_EQ((*face0)->bbox[3], 40.0f);
+    EXPECT_EQ(result.size(), 1U);
+    EXPECT_FLOAT_EQ(result.confidence(0U), 0.95f);
+    EXPECT_EQ(result.bbox(0U)[0], 10.0f);
+    EXPECT_EQ(result.bbox(0U)[1], 20.0f);
+    EXPECT_EQ(result.bbox(0U)[2], 30.0f);
+    EXPECT_EQ(result.bbox(0U)[3], 40.0f);
+
+    ASSERT_TRUE(result.add_landmark(0U, 1.0f, 2.0f, 3.0f).has_value());
+    ASSERT_TRUE(result.add_landmark(0U, 4.0f, 5.0f, 6.0f).has_value());
+    EXPECT_EQ(result.landmark_count(0U), 2U);
+    EXPECT_EQ(result.landmark_x_for(0U).size(), 2U);
+    EXPECT_EQ(result.landmark_y_for(0U).size(), 2U);
+    EXPECT_EQ(result.landmark_z_for(0U).size(), 2U);
+    EXPECT_FLOAT_EQ(result.landmark_x_for(0U)[0], 1.0f);
+    EXPECT_FLOAT_EQ(result.landmark_y_for(0U)[0], 2.0f);
+    EXPECT_FLOAT_EQ(result.landmark_z_for(0U)[0], 3.0f);
+    EXPECT_FLOAT_EQ(result.landmark_x_for(0U)[1], 4.0f);
+    EXPECT_FLOAT_EQ(result.landmark_y_for(0U)[1], 5.0f);
+    EXPECT_FLOAT_EQ(result.landmark_z_for(0U)[1], 6.0f);
+
+    auto face1 = result.add_face({50.0f, 60.0f, 70.0f, 80.0f}, 0.75f);
+    ASSERT_TRUE(face1.has_value());
+    EXPECT_EQ((*face1)->index, 1U);
+    EXPECT_EQ(result.size(), 2U);
+    EXPECT_EQ(result.face_rois().size(), 2U);
+    EXPECT_TRUE(result.landmark_x_for(1U).empty());
+    EXPECT_TRUE(result.add_landmark(1U, 7.0f, 8.0f, 9.0f).has_value());
+    EXPECT_EQ(result.landmark_count(1U), 1U);
+    EXPECT_FLOAT_EQ(result.landmark_x_for(1U)[0], 7.0f);
+}
+
+TEST(DetectionResult, RejectsOverflowAndInvalidLandmarkIndex) {
+    DetectionResult result;
+
+    for (std::size_t index = 0U; index < axvp::internal::AXVP_MAX_FACES;
+         ++index) {
+        auto face = result.add_face(
+            {static_cast<float>(index), 0.0f, 1.0f, 1.0f}, 0.5f);
+        ASSERT_TRUE(face.has_value());
+        EXPECT_EQ((*face)->index, index);
+    }
+
+    EXPECT_TRUE(result.full());
+    auto overflow = result.add_face({1.0f, 1.0f, 1.0f, 1.0f}, 0.1f);
+    ASSERT_FALSE(overflow.has_value());
+    EXPECT_EQ(overflow.error(), Error::ResourceExhausted);
+
+    DetectionResult empty;
+    auto invalid = empty.add_landmark(0U, 1.0f, 2.0f, 3.0f);
+    ASSERT_FALSE(invalid.has_value());
+    EXPECT_EQ(invalid.error(), Error::ConfigInvalidValue);
+    EXPECT_TRUE(empty.landmark_x_for(0U).empty());
+    EXPECT_TRUE(empty.face_rois().empty());
 }
 
 TEST(SecureBuffer, CopyClearAndMovePreserveContract) {
