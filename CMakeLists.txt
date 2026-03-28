@@ -28,9 +28,27 @@ include(GoogleTest)
 
 find_package(OpenCV REQUIRED COMPONENTS core)
 
+set(AXVP_SCHEMA_FILE "${PROJECT_SOURCE_DIR}/schema/axvphantom.fbs")
+set(AXVP_GENERATED_DIR "${CMAKE_CURRENT_BINARY_DIR}/generated")
+set(AXVP_GENERATED_HEADER "${AXVP_GENERATED_DIR}/axvphantom_generated.h")
+
+find_program(AXVP_FLATC_EXECUTABLE NAMES flatc REQUIRED)
+
+add_custom_command(
+    OUTPUT "${AXVP_GENERATED_HEADER}"
+    COMMAND "${CMAKE_COMMAND}" -E make_directory "${AXVP_GENERATED_DIR}"
+    COMMAND "${AXVP_FLATC_EXECUTABLE}" --cpp -o "${AXVP_GENERATED_DIR}" "${AXVP_SCHEMA_FILE}"
+    DEPENDS "${AXVP_SCHEMA_FILE}"
+    COMMENT "Generating FlatBuffers header from axvphantom.fbs"
+    VERBATIM
+)
+
+add_custom_target(axvphantom_flatbuffers_codegen DEPENDS "${AXVP_GENERATED_HEADER}")
+
 set(AXVP_PUBLIC_INCLUDE_DIR "${PROJECT_SOURCE_DIR}/include")
 
 add_library(axvphantom SHARED src/axvphantom.cpp)
+add_dependencies(axvphantom axvphantom_flatbuffers_codegen)
 
 target_compile_features(axvphantom PUBLIC cxx_std_23)
 target_include_directories(axvphantom
@@ -39,6 +57,7 @@ target_include_directories(axvphantom
         $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
         ${OpenCV_INCLUDE_DIRS}
     PRIVATE
+        ${AXVP_GENERATED_DIR}
         ${PROJECT_SOURCE_DIR}/src
 )
 target_link_libraries(axvphantom PUBLIC ${OpenCV_LIBS})
@@ -121,4 +140,8 @@ install(DIRECTORY include/axvphantom/
     FILES_MATCHING
         PATTERN "*.h"
         PATTERN "*.hpp"
+)
+
+install(FILES "${AXVP_GENERATED_HEADER}"
+    DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/axvphantom/generated
 )
