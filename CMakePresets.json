@@ -1,0 +1,124 @@
+{
+    "version": 8,
+    "cmakeMinimumRequired": {
+        "major": 3,
+        "minor": 28,
+        "patch": 0
+    },
+    "configurePresets": [
+        {
+            "name": "ninja-base",
+            "hidden": true,
+            "generator": "Ninja",
+            "binaryDir": "${sourceDir}/build/${presetName}",
+            "cacheVariables": {
+                "CMAKE_CXX_STANDARD": "23",
+                "CMAKE_CXX_STANDARD_REQUIRED": "ON",
+                "CMAKE_CXX_EXTENSIONS": "OFF",
+                "CMAKE_EXPORT_COMPILE_COMMANDS": "ON",
+                "AXVP_BUILD_TESTS": "ON",
+                "AXVP_BUILD_BENCH": "ON",
+                "AXVP_EDGEARM": "OFF"
+            }
+        },
+        {
+            "name": "debug",
+            "inherits": "ninja-base",
+            "displayName": "Debug",
+            "description": "Debug configuration for development work.",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "Debug"
+            }
+        },
+        {
+            "name": "release",
+            "inherits": "ninja-base",
+            "displayName": "Release",
+            "description": "Optimized release configuration.",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "Release"
+            }
+        },
+        {
+            "name": "relwithdebinfo",
+            "inherits": "ninja-base",
+            "displayName": "RelWithDebInfo",
+            "description": "Release-style build with debug information.",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "RelWithDebInfo"
+            }
+        },
+        {
+            "name": "edgearm",
+            "inherits": "ninja-base",
+            "displayName": "EdgeARM",
+            "description": "Cross-build configuration for ARM edge devices.",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "Release",
+                "AXVP_EDGEARM": "ON"
+            }
+        },
+        {
+            "name": "lint",
+            "inherits": "ninja-base",
+            "displayName": "Lint",
+            "description": "Clang-based configuration for static analysis.",
+            "binaryDir": "${sourceDir}/build/${presetName}",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "Debug",
+                "CMAKE_CXX_COMPILER": "clang++",
+                "AXVP_BUILD_TESTS": "OFF",
+                "AXVP_BUILD_BENCH": "OFF",
+                "AXVP_EDGEARM": "OFF"
+            }
+        }
+    ],
+    "buildPresets": [
+        {
+            "name": "debug",
+            "configurePreset": "debug"
+        },
+        {
+            "name": "release",
+            "configurePreset": "release"
+        },
+        {
+            "name": "relwithdebinfo",
+            "configurePreset": "relwithdebinfo"
+        },
+        {
+            "name": "edgearm",
+            "configurePreset": "edgearm"
+        }
+    ],
+    "testPresets": [
+        {
+            "name": "debug",
+            "configurePreset": "debug",
+            "output": {
+                "outputOnFailure": true
+            }
+        },
+        {
+            "name": "release",
+            "configurePreset": "release",
+            "output": {
+                "outputOnFailure": true
+            }
+        },
+        {
+            "name": "relwithdebinfo",
+            "configurePreset": "relwithdebinfo",
+            "output": {
+                "outputOnFailure": true
+            }
+        },
+        {
+            "name": "edgearm",
+            "configurePreset": "edgearm",
+            "output": {
+                "outputOnFailure": true
+            }
+        }
+    ]
+}
