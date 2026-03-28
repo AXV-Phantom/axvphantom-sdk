@@ -8,7 +8,34 @@
 #include <expected>
 #include <opencv2/core.hpp>
 #include <span>
+#include <type_traits>
 #include <utility>
+
+inline constexpr axvp_policy_t operator|(axvp_policy_t lhs,
+                                         axvp_policy_t rhs) noexcept {
+    using Underlying = std::underlying_type_t<axvp_policy_t>;
+    return static_cast<axvp_policy_t>(static_cast<Underlying>(lhs) |
+                                      static_cast<Underlying>(rhs));
+}
+
+inline constexpr axvp_policy_t operator&(axvp_policy_t lhs,
+                                         axvp_policy_t rhs) noexcept {
+    using Underlying = std::underlying_type_t<axvp_policy_t>;
+    return static_cast<axvp_policy_t>(static_cast<Underlying>(lhs) &
+                                      static_cast<Underlying>(rhs));
+}
+
+inline constexpr axvp_policy_t &operator|=(axvp_policy_t &lhs,
+                                           axvp_policy_t rhs) noexcept {
+    lhs = lhs | rhs;
+    return lhs;
+}
+
+inline constexpr axvp_policy_t &operator&=(axvp_policy_t &lhs,
+                                           axvp_policy_t rhs) noexcept {
+    lhs = lhs & rhs;
+    return lhs;
+}
 
 namespace axvp {
 

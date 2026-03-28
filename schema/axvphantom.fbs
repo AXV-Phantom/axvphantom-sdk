@@ -1,0 +1,47 @@
+// AXV Phantom metadata schema.
+// Append-only contract: add new fields only to the end of tables and keep
+// existing field order stable. Breaking changes require a new file_identifier.
+
+namespace axvp.fb;
+
+file_identifier "AXVP";
+file_extension "axvp";
+
+// Liveness verdicts are kept numerically aligned with the public C API.
+enum LivenessVerdict:ubyte {
+    UNCERTAIN = 0,
+    SPOOF = 1,
+    LIVE = 2,
+}
+
+// Bounding box in pixel coordinates.
+struct Rect {
+    x:float;
+    y:float;
+    width:float;
+    height:float;
+}
+
+// One face record stored inline in the FrameMetadata faces vector.
+// face_id must contain exactly 16 bytes.
+struct FaceRecord {
+    face_id:[ubyte:16];
+    bbox:Rect;
+    liveness_score:float;
+    pulse_bpm:uint;
+    verdict:LivenessVerdict;
+    pixels_wiped:bool;
+}
+
+table FrameMetadata {
+    frame_id:ulong;
+    timestamp_ns:ulong;
+    pipeline_version:string;
+    faces:[FaceRecord];
+    faces_detected:uint;
+    faces_anonymized:uint;
+    anonymization_complete:bool;
+    processing_latency_us:uint;
+}
+
+root_type FrameMetadata;

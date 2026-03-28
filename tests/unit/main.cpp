@@ -30,7 +30,13 @@ static_assert(!std::is_copy_assignable_v<UniqueFrame>);
 static_assert(!std::is_copy_constructible_v<axvp::Context>);
 static_assert(!std::is_copy_assignable_v<axvp::Context>);
 static_assert(std::is_move_constructible_v<axvp::Context>);
+static_assert(!std::is_copy_constructible_v<axvp::Result>);
+static_assert(!std::is_copy_assignable_v<axvp::Result>);
 static_assert(std::is_move_constructible_v<axvp::Result>);
+static_assert(std::is_copy_constructible_v<axvp::Frame>);
+static_assert(std::is_copy_assignable_v<axvp::Frame>);
+static_assert(std::is_copy_constructible_v<axvp::MetadataView>);
+static_assert(std::is_copy_assignable_v<axvp::MetadataView>);
 
 class TickListener {
   public:
@@ -181,6 +187,64 @@ TEST(GMockIntegration, MockCallIsObserved) {
     testing::StrictMock<MockTickListener> listener;
     EXPECT_CALL(listener, on_tick(42U));
     emit_tick(listener, 42U);
+}
+
+TEST(CppWrapper, ThinLifecycleAndRoundtripWork) {
+    axvp_config_t config{};
+    config.size = static_cast<std::uint32_t>(sizeof(config));
+    config.width = 1U;
+    config.height = 1U;
+    config.format = AXVP_FMT_BGR;
+    config.policy = AXVP_POLICY_NONE;
+    config.device_index = 0U;
+    config.rppg_window_frames = 4U;
+    config.model_dir = ".";
+
+    auto context = axvp::Context::create(config);
+    ASSERT_TRUE(context.has_value());
+    EXPECT_TRUE(context->valid());
+    EXPECT_NE(context->native(), nullptr);
+
+    EXPECT_EQ(context->set_policy(AXVP_POLICY_BLOCK_ON_FAIL |
+                                  AXVP_POLICY_BLUR_FALLBACK),
+              AXVP_STATUS_OK);
+    EXPECT_EQ(context->rotate_keys(), AXVP_STATUS_OK);
+
+    const std::array<std::byte, 4> payload{
+        std::byte{0x01},
+        std::byte{0x02},
+        std::byte{0x03},
+        std::byte{0x04},
+    };
+
+    axvp::Frame frame(payload.data(), 1U, 1U, 4U, AXVP_FMT_BGR, 99U);
+    EXPECT_EQ(frame.native()->size, sizeof(axvp_frame_t));
+    EXPECT_EQ(frame.native()->data, payload.data());
+    EXPECT_EQ(frame.native()->width, 1U);
+    EXPECT_EQ(frame.native()->height, 1U);
+    EXPECT_EQ(frame.native()->stride, 4U);
+    EXPECT_EQ(frame.native()->format, AXVP_FMT_BGR);
+
+    auto processed = context->process(frame);
+    ASSERT_TRUE(processed.has_value());
+    EXPECT_NE(processed->context(), nullptr);
+    EXPECT_EQ(processed->context(), context->native());
+    EXPECT_EQ(processed->native()->size, sizeof(axvp_result_t));
+    EXPECT_EQ(processed->native()->status, AXVP_STATUS_OK);
+    EXPECT_EQ(processed->native()->frame.data, frame.native()->data);
+    EXPECT_EQ(processed->native()->frame.width, frame.native()->width);
+    EXPECT_EQ(processed->native()->frame.height, frame.native()->height);
+    EXPECT_EQ(processed->native()->frame.format, frame.native()->format);
+    EXPECT_EQ(processed->native()->metadata, nullptr);
+    EXPECT_EQ(processed->native()->metadata_size, 0U);
+    EXPECT_EQ(processed->native()->faces_detected, 0U);
+    EXPECT_EQ(processed->native()->faces_anonymized, 0U);
+    EXPECT_EQ(processed->native()->anonymization_complete, 0U);
+
+    std::span<const std::byte> metadata_bytes{payload};
+    axvp::MetadataView view(metadata_bytes);
+    EXPECT_FALSE(view.empty());
+    EXPECT_EQ(view.bytes().size(), payload.size());
 }
 
 } // namespace

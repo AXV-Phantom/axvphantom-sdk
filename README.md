@@ -107,12 +107,10 @@ The main tracked files and directories in this repo are:
 - `conanfile.py`
 - `conan/profiles/`
 - `src/`
+- `schema/`
 - `tests/unit/`
 - `tests/bench/`
 - `CHANGELOG.md`
 - `LICENSE`
 - `VERSION`
 
-## License
-
-Licensed under the terms of the `LGPL-3.0-or-later` license. See [LICENSE](LICENSE).

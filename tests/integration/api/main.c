@@ -37,6 +37,12 @@ int main(void) {
     CHECK(ctx != NULL);
     CHECK(status == AXVP_STATUS_OK);
 
+    status = axvp_set_policy(ctx, AXVP_POLICY_BLOCK_ON_FAIL | AXVP_POLICY_BLUR_FALLBACK);
+    CHECK(status == AXVP_STATUS_OK);
+
+    status = axvp_rotate_keys(ctx);
+    CHECK(status == AXVP_STATUS_OK);
+
     uint8_t pixels[4] = {1U, 2U, 3U, 4U};
     axvp_frame_t frame = {0};
     frame.size = (uint32_t)sizeof(frame);
