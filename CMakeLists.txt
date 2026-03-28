@@ -1,6 +1,17 @@
 cmake_minimum_required(VERSION 3.28)
 
-project(axvphantom VERSION 0.0.0 LANGUAGES CXX)
+set(AXVP_VERSION_FILE "${CMAKE_CURRENT_SOURCE_DIR}/VERSION")
+file(READ "${AXVP_VERSION_FILE}" AXVP_VERSION_RAW)
+string(STRIP "${AXVP_VERSION_RAW}" AXVP_VERSION_RAW)
+string(REGEX MATCH "^[0-9]+\\.[0-9]+\\.[0-9]+" AXVP_PROJECT_VERSION "${AXVP_VERSION_RAW}")
+
+if(NOT AXVP_PROJECT_VERSION)
+    message(FATAL_ERROR "Invalid version string in ${AXVP_VERSION_FILE}: ${AXVP_VERSION_RAW}")
+endif()
+
+project(axvphantom VERSION "${AXVP_PROJECT_VERSION}" LANGUAGES C CXX)
+
+set(AXVP_VERSION "${AXVP_VERSION_RAW}")
 
 option(AXVP_BUILD_TESTS "Build the axvphantom_tests target" ON)
 option(AXVP_BUILD_BENCH "Build the axvphantom_bench target" ON)
@@ -79,6 +90,17 @@ if(AXVP_BUILD_TESTS AND BUILD_TESTING)
     target_include_directories(axvphantom_tests PRIVATE ${PROJECT_SOURCE_DIR}/src)
     target_link_libraries(axvphantom_tests PRIVATE axvphantom GTest::gmock_main)
     gtest_discover_tests(axvphantom_tests)
+
+    add_executable(axvphantom_capi_smoke tests/integration/api/main.c)
+    target_compile_features(axvphantom_capi_smoke PRIVATE c_std_99)
+    target_include_directories(axvphantom_capi_smoke PRIVATE ${PROJECT_SOURCE_DIR}/include)
+    target_link_libraries(axvphantom_capi_smoke PRIVATE axvphantom)
+    set_target_properties(axvphantom_capi_smoke PROPERTIES
+        C_STANDARD 99
+        C_STANDARD_REQUIRED YES
+        C_EXTENSIONS NO
+    )
+    add_test(NAME axvphantom_capi_smoke COMMAND axvphantom_capi_smoke)
 endif()
 
 if(AXVP_BUILD_BENCH)

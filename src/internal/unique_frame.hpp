@@ -2,6 +2,8 @@
 
 #include "support.hpp"
 
+#include <algorithm>
+#include <atomic>
 #include <cstddef>
 #include <memory>
 #include <opencv2/core/mat.hpp>
@@ -15,7 +17,10 @@ inline void wipe_mat(cv::Mat &mat) noexcept {
         return;
     }
 
-    secure_zero(mat.data, mat.total() * mat.elemSize());
+    auto *const begin = reinterpret_cast<std::byte *>(mat.data);
+    auto *const end = begin + (mat.total() * mat.elemSize());
+    std::fill(begin, end, std::byte{0});
+    std::atomic_signal_fence(std::memory_order_seq_cst);
 }
 
 } // namespace axvp::internal::detail

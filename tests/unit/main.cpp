@@ -11,6 +11,9 @@
 #include <memory_resource>
 #include <opencv2/core.hpp>
 #include <thread>
+#include <type_traits>
+
+#include "axvphantom/axvphantom.hpp"
 
 namespace {
 
@@ -19,6 +22,15 @@ using axvp::internal::FramePoolAllocator;
 using axvp::internal::ScopedTimer;
 using axvp::internal::SecureBuffer;
 using axvp::internal::UniqueFrame;
+
+static_assert(!std::is_copy_constructible_v<SecureBuffer>);
+static_assert(!std::is_copy_assignable_v<SecureBuffer>);
+static_assert(!std::is_copy_constructible_v<UniqueFrame>);
+static_assert(!std::is_copy_assignable_v<UniqueFrame>);
+static_assert(!std::is_copy_constructible_v<axvp::Context>);
+static_assert(!std::is_copy_assignable_v<axvp::Context>);
+static_assert(std::is_move_constructible_v<axvp::Context>);
+static_assert(std::is_move_constructible_v<axvp::Result>);
 
 class TickListener {
   public:
@@ -36,17 +48,21 @@ void emit_tick(TickListener &listener, std::uint32_t value) {
 }
 
 TEST(ErrorMessages, KnownCodesHaveDescriptions) {
-    const std::array<Error, 12> errors{
+    const std::array<Error, 16> errors{
         Error::Ok,
+        Error::ConfigError,
         Error::ConfigMissingValue,
         Error::ConfigInvalidValue,
         Error::ConfigUnsupportedValue,
+        Error::ResourceError,
         Error::ResourceAllocationFailed,
         Error::ResourceExhausted,
         Error::ResourceLockFailed,
         Error::ResourceUnlockFailed,
+        Error::PipelineError,
         Error::PipelineNotInitialized,
         Error::PipelineStageFailed,
+        Error::SecurityError,
         Error::SecurityWipeFailed,
         Error::SecurityIntegrityViolation,
     };
@@ -56,6 +72,14 @@ TEST(ErrorMessages, KnownCodesHaveDescriptions) {
     }
 
     EXPECT_EQ(axvp::internal::error_message(Error::Ok), "ok");
+    EXPECT_EQ(axvp::internal::error_message(Error::ConfigError),
+              "config error");
+    EXPECT_EQ(axvp::internal::error_message(Error::ResourceError),
+              "resource error");
+    EXPECT_EQ(axvp::internal::error_message(Error::PipelineError),
+              "pipeline error");
+    EXPECT_EQ(axvp::internal::error_message(Error::SecurityError),
+              "security error");
 }
 
 TEST(SecureBuffer, CopyClearAndMovePreserveContract) {

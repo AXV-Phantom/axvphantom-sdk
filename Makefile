@@ -49,5 +49,6 @@ lint:
 	$(CMAKE) --preset lint
 	$(CMAKE) --build $(LINT_BUILD_DIR)
 	@if [ -n "$(TIDY_FILES)" ]; then \
-		$(CLANG_TIDY) -p $(LINT_BUILD_DIR) --config-file=$(PROJECT_ROOT)/.clang-tidy $(TIDY_FILES); \
+		set -o pipefail; \
+		$(CLANG_TIDY) --quiet -p $(LINT_BUILD_DIR) --config-file=$(PROJECT_ROOT)/.clang-tidy $(TIDY_FILES) 2>&1 | sed '/warnings generated/d'; \
 	fi
