@@ -1,2 +1,2 @@
-# axv-phantom-sdk
+# axvphantom-sdk
 AXV Phantom SDK
