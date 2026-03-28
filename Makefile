@@ -6,6 +6,7 @@ CLANG_FORMAT ?= clang-format
 CLANG_TIDY ?= clang-tidy
 
 PROJECT_ROOT := $(abspath $(dir $(lastword $(MAKEFILE_LIST))))
+DATA_DIR := $(PROJECT_ROOT)/data
 DEBUG_BUILD_DIR := $(PROJECT_ROOT)/build/debug
 RELEASE_BUILD_DIR := $(PROJECT_ROOT)/build/release
 LINT_BUILD_DIR := $(PROJECT_ROOT)/build/lint
@@ -19,7 +20,7 @@ TIDY_FILES := $(shell find src -type f \( -name '*.cpp' -o -name '*.cc' -o -name
 
 .DEFAULT_GOAL := build
 
-.PHONY: build release test install fmt lint
+.PHONY: build release test install install-data fmt lint
 
 build:
 	$(CMAKE) --preset debug
@@ -39,6 +40,9 @@ install:
 		--profile:build default \
 		--build=missing \
 		--conf tools.system.package_manager:mode=$(CONAN_SYSTEM_PACKAGE_MANAGER_MODE)
+
+install-data:
+	bash $(PROJECT_ROOT)/scripts/install-data.sh $(DATA_DIR)
 
 fmt:
 	@if [ -n "$(FMT_FILES)" ]; then \

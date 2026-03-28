@@ -45,3 +45,6 @@ build/
 cmake-build-*/
 install/
 CMakeUserPresets.json
+
+# Local project data and downloaded models
+/data/
