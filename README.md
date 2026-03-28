@@ -15,8 +15,8 @@ will evolve into the full pipeline described in the project documentation.
 
 - `CMake` is configured for `Ninja`.
 - `CTest` is enabled at the build-system level.
-- `GTest` and `GMock` are not wired in yet.
-- `axvphantom_tests` and `axvphantom_bench` are placeholder executables for now.
+- `GTest` and `GMock` are wired into the unit-test target.
+- `axvphantom_tests` is a GoogleTest suite; `axvphantom_bench` remains a placeholder executable.
 - `make lint` checks production sources under `src/` only.
 - `make install` bootstraps Conan dependencies; it does not install the SDK itself.
 
@@ -74,6 +74,8 @@ The repository ships with these CMake presets:
 
 The `lint` preset uses `clang++` and disables tests and benchmarks so static analysis stays focused on production code.
 
+If no local GoogleTest package is available, CMake fetches the official `googletest` release for the test build.
+
 ## Dependencies
 
 Dependencies are managed through Conan 2 and currently include:
@@ -114,4 +116,3 @@ The main tracked files and directories in this repo are:
 ## License
 
 Licensed under the terms of the `LGPL-3.0-or-later` license. See [LICENSE](LICENSE).
-

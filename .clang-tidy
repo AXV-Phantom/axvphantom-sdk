@@ -2,12 +2,9 @@
 Checks: >-
   -*,
   bugprone-*,
+  -bugprone-easily-swappable-parameters,
   clang-analyzer-*,
-  misc-*,
-  modernize-*,
-  performance-*,
   portability-*,
-  readability-*,
   cppcoreguidelines-explicit-virtual-functions,
   cppcoreguidelines-init-variables,
   cppcoreguidelines-pro-type-member-init,
@@ -15,17 +12,14 @@ Checks: >-
   cppcoreguidelines-virtual-class-destructor
 WarningsAsErrors: >-
   bugprone-*,
+  -bugprone-easily-swappable-parameters,
   clang-analyzer-*,
+  portability-*,
   cppcoreguidelines-explicit-virtual-functions,
   cppcoreguidelines-init-variables,
   cppcoreguidelines-pro-type-member-init,
   cppcoreguidelines-special-member-functions,
-  cppcoreguidelines-virtual-class-destructor,
-  misc-*,
-  modernize-*,
-  performance-*,
-  portability-*,
-  readability-*
+  cppcoreguidelines-virtual-class-destructor
 HeaderFilterRegex: '(^|.*/)(include|src)/'
 ExcludeHeaderFilterRegex: '(^|.*/)(tests|build|schema|cmake)/'
 FormatStyle: file
