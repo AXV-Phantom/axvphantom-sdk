@@ -16,9 +16,21 @@
                 "CMAKE_CXX_STANDARD_REQUIRED": "ON",
                 "CMAKE_CXX_EXTENSIONS": "OFF",
                 "CMAKE_EXPORT_COMPILE_COMMANDS": "ON",
+                "BUILD_TESTING": "ON",
                 "AXVP_BUILD_TESTS": "ON",
                 "AXVP_BUILD_BENCH": "ON",
                 "AXVP_EDGEARM": "OFF"
+            }
+        },
+        {
+            "name": "sanitize-base",
+            "hidden": true,
+            "inherits": "ninja-base",
+            "cacheVariables": {
+                "CMAKE_C_FLAGS": "-fsanitize=address,undefined -fno-omit-frame-pointer",
+                "CMAKE_CXX_FLAGS": "-fsanitize=address,undefined -fno-omit-frame-pointer",
+                "CMAKE_EXE_LINKER_FLAGS": "-fsanitize=address,undefined",
+                "CMAKE_SHARED_LINKER_FLAGS": "-fsanitize=address,undefined"
             }
         },
         {
@@ -71,6 +83,28 @@
                 "AXVP_BUILD_BENCH": "OFF",
                 "AXVP_EDGEARM": "OFF"
             }
+        },
+        {
+            "name": "asan",
+            "inherits": "sanitize-base",
+            "displayName": "ASan/UBSan",
+            "description": "AddressSanitizer and UndefinedBehaviorSanitizer configuration.",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "RelWithDebInfo"
+            }
+        },
+        {
+            "name": "tsan",
+            "inherits": "ninja-base",
+            "displayName": "TSan",
+            "description": "ThreadSanitizer configuration.",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "Debug",
+                "CMAKE_C_FLAGS": "-fsanitize=thread -fno-omit-frame-pointer",
+                "CMAKE_CXX_FLAGS": "-fsanitize=thread -fno-omit-frame-pointer",
+                "CMAKE_EXE_LINKER_FLAGS": "-fsanitize=thread",
+                "CMAKE_SHARED_LINKER_FLAGS": "-fsanitize=thread"
+            }
         }
     ],
     "buildPresets": [
@@ -89,6 +123,14 @@
         {
             "name": "edgearm",
             "configurePreset": "edgearm"
+        },
+        {
+            "name": "asan",
+            "configurePreset": "asan"
+        },
+        {
+            "name": "tsan",
+            "configurePreset": "tsan"
         }
     ],
     "testPresets": [
@@ -118,6 +160,28 @@
             "configurePreset": "edgearm",
             "output": {
                 "outputOnFailure": true
+            }
+        },
+        {
+            "name": "asan",
+            "configurePreset": "asan",
+            "output": {
+                "outputOnFailure": true
+            },
+            "environment": {
+                "LSAN_OPTIONS": "suppressions=${sourceDir}/cmake/lsan.supp",
+                "AXVP_FORCE_CPU_BACKEND": "1"
+            }
+        },
+        {
+            "name": "tsan",
+            "configurePreset": "tsan",
+            "output": {
+                "outputOnFailure": true
+            },
+            "environment": {
+                "AXVP_FORCE_CPU_BACKEND": "1",
+                "TSAN_OPTIONS": "ignore_noninstrumented_modules=1"
             }
         }
     ]

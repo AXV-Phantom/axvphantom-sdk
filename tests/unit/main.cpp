@@ -3,7 +3,9 @@
 #include <algorithm>
 #include <array>
 #include <atomic>
+#include <barrier>
 #include <chrono>
+#include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
@@ -28,7 +30,11 @@ namespace {
 using axvp::internal::DetectionResult;
 using axvp::internal::DetectorModel;
 using axvp::internal::Error;
+using axvp::internal::AnonymizationResult;
+using axvp::internal::ComposerStage;
 using axvp::internal::FramePoolAllocator;
+using axvp::internal::LivenessResult;
+using axvp::internal::LivenessStage;
 using axvp::internal::ScopedTimer;
 using axvp::internal::SecureBuffer;
 using axvp::internal::UniqueFrame;
@@ -101,6 +107,29 @@ void emit_tick(TickListener &listener, std::uint32_t value) {
     }
 
     return std::make_shared<DetectorModel>(std::move(model).value());
+}
+
+[[nodiscard]] DetectionResult make_face_detection_result() {
+    DetectionResult result;
+    auto face = result.add_face({16.0f, 16.0f, 32.0f, 32.0f}, 0.99f);
+    EXPECT_TRUE(face.has_value());
+    if (face.has_value()) {
+        EXPECT_TRUE(result.add_landmark(0U, 24.0f, 28.0f, 0.0f).has_value());
+        EXPECT_TRUE(result.add_landmark(0U, 40.0f, 28.0f, 0.0f).has_value());
+        EXPECT_TRUE(result.add_landmark(0U, 32.0f, 36.0f, 0.0f).has_value());
+        EXPECT_TRUE(result.add_landmark(0U, 26.0f, 44.0f, 0.0f).has_value());
+        EXPECT_TRUE(result.add_landmark(0U, 38.0f, 44.0f, 0.0f).has_value());
+    }
+
+    return result;
+}
+
+[[nodiscard]] cv::Mat make_synthetic_rppg_frame(float modulation) {
+    cv::Mat frame(64, 64, CV_8UC3);
+    frame.setTo(cv::Scalar(18, 18, 18));
+    const cv::Rect roi{16, 16, 32, 32};
+    frame(roi).setTo(cv::Scalar(52, 100 + modulation, 52));
+    return frame;
 }
 
 class FailingLandmarkBackend final : public axvp::internal::LandmarkBackend {
@@ -571,15 +600,240 @@ TEST(CppWrapper, ThinLifecycleAndRoundtripWork) {
     EXPECT_EQ(processed->context(), context->native());
     EXPECT_EQ(processed->native()->size, sizeof(axvp_result_t));
     EXPECT_EQ(processed->native()->status, AXVP_STATUS_OK);
-    EXPECT_EQ(processed->native()->frame.data, frame.native()->data);
+    EXPECT_NE(processed->native()->frame.data, frame.native()->data);
     EXPECT_EQ(processed->native()->frame.width, frame.native()->width);
     EXPECT_EQ(processed->native()->frame.height, frame.native()->height);
     EXPECT_EQ(processed->native()->frame.format, frame.native()->format);
-    EXPECT_EQ(processed->native()->metadata, nullptr);
-    EXPECT_EQ(processed->native()->metadata_size, 0U);
+    EXPECT_NE(processed->native()->metadata, nullptr);
+    EXPECT_GT(processed->native()->metadata_size, 0U);
     EXPECT_EQ(processed->native()->faces_detected, 0U);
     EXPECT_EQ(processed->native()->faces_anonymized, 0U);
-    EXPECT_EQ(processed->native()->anonymization_complete, 0U);
+    EXPECT_EQ(processed->native()->anonymization_complete, 1U);
+
+    auto view = axvp::MetadataView::create(*processed->native());
+    ASSERT_TRUE(view.has_value());
+    EXPECT_EQ(view->faces_detected(), 0U);
+    EXPECT_EQ(view->faces_anonymized(), 0U);
+    EXPECT_TRUE(view->anonymization_complete());
+}
+
+TEST(CppWrapper, ProcessesFaceImageAndAnonymizesOutput) {
+    axvp_config_t config{};
+    config = make_test_config();
+
+    auto context = axvp::Context::create(config);
+    ASSERT_TRUE(context.has_value());
+
+    cv::Mat input = load_test_image(
+        "test-images/face_detection/opencv_extra/gray_face.png");
+    ASSERT_FALSE(input.empty());
+
+    axvp::Frame frame(input, 42U);
+    auto processed = context->process(frame);
+    ASSERT_TRUE(processed.has_value());
+    EXPECT_NE(processed->native()->frame.data, frame.native()->data);
+    EXPECT_GT(processed->native()->faces_detected, 0U);
+    EXPECT_EQ(processed->native()->faces_detected,
+              processed->native()->faces_anonymized);
+    EXPECT_EQ(processed->native()->anonymization_complete, 1U);
+    EXPECT_NE(processed->native()->metadata, nullptr);
+    EXPECT_GT(processed->native()->metadata_size, 0U);
+
+    const cv::Mat anonymized(
+        static_cast<int>(processed->native()->frame.height),
+        static_cast<int>(processed->native()->frame.width), CV_8UC3,
+        const_cast<void *>(processed->native()->frame.data),
+        static_cast<std::size_t>(processed->native()->frame.stride));
+    EXPECT_GT(cv::norm(input, anonymized, cv::NORM_L1), 0.0);
+
+    auto view = axvp::MetadataView::create(*processed->native());
+    ASSERT_TRUE(view.has_value());
+    EXPECT_EQ(view->faces_detected(), processed->native()->faces_detected);
+    EXPECT_EQ(view->faces_anonymized(), processed->native()->faces_anonymized);
+    EXPECT_TRUE(view->anonymization_complete());
+    EXPECT_EQ(view->faces().size(), processed->native()->faces_detected);
+}
+
+TEST(LivenessStage, ClassifiesSyntheticLiveAndSpoofSignals) {
+    axvp_config_t config = make_test_config();
+    config.rppg_window_frames = 16U;
+
+    auto stage = LivenessStage::create(config);
+    ASSERT_TRUE(stage.has_value())
+        << axvp::internal::error_message(stage.error());
+
+    DetectionResult detection = make_face_detection_result();
+    ASSERT_EQ(detection.size(), 1U);
+
+    const std::uint64_t frame_period_ns = 33'333'333ULL;
+    LivenessResult live_result{};
+
+    for (std::size_t frame_index = 0U; frame_index < 24U; ++frame_index) {
+        const double phase = 2.0 * 3.14159265358979323846 * 1.4 *
+                             (static_cast<double>(frame_index) / 30.0);
+        const float modulation = 8.0f * static_cast<float>(std::sin(phase));
+        cv::Mat frame = make_synthetic_rppg_frame(modulation);
+        auto result =
+            stage->process(frame, detection, frame_index * frame_period_ns);
+        ASSERT_TRUE(result.has_value())
+            << axvp::internal::error_message(result.error());
+        live_result = *result;
+    }
+
+    const auto *live_face = live_result.find(0U);
+    ASSERT_NE(live_face, nullptr);
+    EXPECT_EQ(live_face->verdict, AXVP_LIVENESS_LIVE);
+    EXPECT_GT(live_face->score, 0.0f);
+    EXPECT_GT(live_face->pulse_bpm, 0U);
+
+    stage->reset();
+
+    LivenessResult spoof_result{};
+    for (std::size_t frame_index = 0U; frame_index < 24U; ++frame_index) {
+        cv::Mat frame = make_synthetic_rppg_frame(0.0f);
+        auto result =
+            stage->process(frame, detection, frame_index * frame_period_ns);
+        ASSERT_TRUE(result.has_value())
+            << axvp::internal::error_message(result.error());
+        spoof_result = *result;
+    }
+
+    const auto *spoof_face = spoof_result.find(0U);
+    ASSERT_NE(spoof_face, nullptr);
+    EXPECT_EQ(spoof_face->verdict, AXVP_LIVENESS_SPOOF);
+    EXPECT_EQ(spoof_face->pulse_bpm, 0U);
+}
+
+TEST(ComposerStage, BuildsMetadataAndRotatesFaceIds) {
+    auto composer = ComposerStage::create();
+    ASSERT_TRUE(composer.has_value())
+        << axvp::internal::error_message(composer.error());
+
+    DetectionResult detection = make_face_detection_result();
+    ASSERT_EQ(detection.size(), 1U);
+
+    AnonymizationResult anonymization;
+    ASSERT_TRUE(anonymization.add_face(0U, detection.bbox(0U), true).has_value());
+
+    LivenessResult liveness;
+    ASSERT_TRUE(
+        liveness.add_face(0U, 0.91f, 72U, AXVP_LIVENESS_LIVE).has_value());
+
+    axvp_frame_t frame{};
+    frame.size = sizeof(frame);
+    frame.timestamp_ns = 987654321ULL;
+    frame.width = 64U;
+    frame.height = 64U;
+    frame.stride = 192U;
+    frame.format = AXVP_FMT_BGR;
+
+    auto metadata1 = composer->compose(7U, frame, detection, anonymization,
+                                       liveness, 321U);
+    ASSERT_TRUE(metadata1.has_value())
+        << axvp::internal::error_message(metadata1.error());
+
+    axvp_result_t result1{};
+    result1.size = sizeof(result1);
+    result1.metadata = reinterpret_cast<const std::uint8_t *>(metadata1->data());
+    result1.metadata_size = metadata1->size();
+    auto view1 = axvp::MetadataView::create(result1);
+    ASSERT_TRUE(view1.has_value());
+    EXPECT_EQ(view1->pipeline_version(), AXVP_VERSION_STRING);
+    EXPECT_EQ(view1->frame_id(), 7U);
+    EXPECT_EQ(view1->timestamp_ns(), 987654321ULL);
+    EXPECT_EQ(view1->faces_detected(), 1U);
+    EXPECT_EQ(view1->faces_anonymized(), 1U);
+    EXPECT_TRUE(view1->anonymization_complete());
+    EXPECT_EQ(view1->processing_latency_us(), 321U);
+
+    const auto faces1 = view1->faces();
+    ASSERT_EQ(faces1.size(), 1U);
+    EXPECT_TRUE(faces1[0].pixels_wiped());
+    EXPECT_EQ(faces1[0].liveness_score(), 0.91f);
+    EXPECT_EQ(faces1[0].pulse_bpm(), 72U);
+    EXPECT_EQ(faces1[0].verdict(), axvp::fb::LivenessVerdict_LIVE);
+
+    std::array<std::uint8_t, 16U> face_id_before{};
+    for (std::size_t index = 0U; index < face_id_before.size(); ++index) {
+        face_id_before[index] = faces1[0].face_id()->Get(index);
+    }
+
+    ASSERT_TRUE(composer->rotate_keys().has_value());
+
+    auto metadata2 = composer->compose(8U, frame, detection, anonymization,
+                                       liveness, 654U);
+    ASSERT_TRUE(metadata2.has_value())
+        << axvp::internal::error_message(metadata2.error());
+
+    axvp_result_t result2{};
+    result2.size = sizeof(result2);
+    result2.metadata = reinterpret_cast<const std::uint8_t *>(metadata2->data());
+    result2.metadata_size = metadata2->size();
+    auto view2 = axvp::MetadataView::create(result2);
+    ASSERT_TRUE(view2.has_value());
+
+    const auto faces2 = view2->faces();
+    ASSERT_EQ(faces2.size(), 1U);
+    std::array<std::uint8_t, 16U> face_id_after{};
+    for (std::size_t index = 0U; index < face_id_after.size(); ++index) {
+        face_id_after[index] = faces2[0].face_id()->Get(index);
+    }
+
+    EXPECT_NE(face_id_before, face_id_after);
+}
+
+TEST(Stress, EightParallelContextsStayHealthy) {
+    cv::Mat input = load_test_image(
+        "test-images/face_detection/opencv_extra/gray_face.png");
+    ASSERT_FALSE(input.empty());
+
+    constexpr std::size_t kThreads = 8U;
+    constexpr std::size_t kIterations = 16U;
+    std::barrier start_gate(static_cast<std::ptrdiff_t>(kThreads + 1U));
+    std::atomic<std::size_t> failures{0U};
+    std::vector<std::thread> workers;
+    workers.reserve(kThreads);
+
+    for (std::size_t thread_index = 0U; thread_index < kThreads;
+         ++thread_index) {
+        workers.emplace_back([&, thread_index]() {
+            auto context = axvp::Context::create(make_test_config());
+            if (!context.has_value()) {
+                failures.fetch_add(1U, std::memory_order_relaxed);
+                start_gate.arrive_and_wait();
+                return;
+            }
+
+            start_gate.arrive_and_wait();
+            for (std::size_t iteration = 0U; iteration < kIterations;
+                 ++iteration) {
+                axvp::Frame frame(
+                    input, static_cast<std::uint64_t>(thread_index * 1'000U +
+                                                       iteration));
+                auto processed = context->process(frame);
+                if (!processed.has_value() ||
+                    processed->native()->status != AXVP_STATUS_OK ||
+                    processed->native()->metadata == nullptr ||
+                    processed->native()->metadata_size == 0U) {
+                    failures.fetch_add(1U, std::memory_order_relaxed);
+                    break;
+                }
+
+                auto view = axvp::MetadataView::create(*processed->native());
+                if (!view.has_value() || !view->valid()) {
+                    failures.fetch_add(1U, std::memory_order_relaxed);
+                    break;
+                }
+            }
+        });
+    }
+
+    start_gate.arrive_and_wait();
+    for (auto &worker : workers) {
+        worker.join();
+    }
+
+    EXPECT_EQ(failures.load(std::memory_order_relaxed), 0U);
 }
 
 TEST(MetadataView, ReadsFlatBufferWithoutCopying) {

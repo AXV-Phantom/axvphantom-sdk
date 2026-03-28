@@ -25,9 +25,12 @@ include(GNUInstallDirs)
 enable_testing()
 include(FetchContent)
 include(GoogleTest)
+include(CheckCXXCompilerFlag)
+include(CheckCXXSourceRuns)
 
 find_package(OpenCV REQUIRED COMPONENTS core imgproc imgcodecs objdetect dnn face)
 find_package(OpenSSL REQUIRED)
+find_package(Vulkan QUIET)
 find_package(flatbuffers CONFIG QUIET)
 if(NOT TARGET flatbuffers::flatbuffers)
     find_path(AXVP_FLATBUFFERS_INCLUDE_DIR NAMES flatbuffers/flatbuffers.h REQUIRED)
@@ -35,6 +38,59 @@ if(NOT TARGET flatbuffers::flatbuffers)
     set_target_properties(flatbuffers::flatbuffers PROPERTIES
         INTERFACE_INCLUDE_DIRECTORIES "${AXVP_FLATBUFFERS_INCLUDE_DIR}"
     )
+endif()
+
+set(AXVP_SIMD_FLAGS "")
+set(AXVP_SIMD_FEATURES "")
+
+macro(axvp_try_append_simd_flag flag feature check_var)
+    check_cxx_compiler_flag("${flag}" ${check_var})
+    if(${check_var})
+        list(APPEND AXVP_SIMD_FLAGS "${flag}")
+        list(APPEND AXVP_SIMD_FEATURES "${feature}")
+    endif()
+endmacro()
+
+if(CMAKE_SYSTEM_PROCESSOR MATCHES "^(x86_64|amd64|AMD64|i[3-6]86)$")
+    if(NOT CMAKE_CROSSCOMPILING)
+        check_cxx_source_runs([=[
+            #include <immintrin.h>
+
+            int main()
+            {
+                __builtin_cpu_init();
+                return __builtin_cpu_supports("avx2") ? 0 : 1;
+            }
+        ]=] AXVP_HOST_HAS_AVX2)
+        if(AXVP_HOST_HAS_AVX2)
+            axvp_try_append_simd_flag("-mavx2" "AVX2" AXVP_HAS_AVX2_FLAG)
+        endif()
+
+        check_cxx_source_runs([=[
+            #include <immintrin.h>
+
+            int main()
+            {
+                __builtin_cpu_init();
+                return __builtin_cpu_supports("avx512f") ? 0 : 1;
+            }
+        ]=] AXVP_HOST_HAS_AVX512F)
+        if(AXVP_HOST_HAS_AVX512F)
+            axvp_try_append_simd_flag("-mavx512f" "AVX-512F" AXVP_HAS_AVX512F_FLAG)
+        endif()
+    endif()
+elseif(AXVP_EDGEARM OR CMAKE_SYSTEM_PROCESSOR MATCHES "^(aarch64|arm64|armv8.*|armv7.*)$")
+    axvp_try_append_simd_flag(
+        "-march=armv8.2-a+dotprod+fp16"
+        "ARMv8.2-A+dotprod+fp16"
+        AXVP_HAS_ARMV82_DOTPROD_FP16_FLAG
+    )
+endif()
+
+add_library(axvphantom_cpu_tuning INTERFACE)
+if(AXVP_SIMD_FLAGS)
+    target_compile_options(axvphantom_cpu_tuning INTERFACE ${AXVP_SIMD_FLAGS})
+    message(STATUS "AXVP SIMD tuning enabled: ${AXVP_SIMD_FEATURES}")
 endif()
 
 set(AXVP_SCHEMA_FILE "${PROJECT_SOURCE_DIR}/schema/axvphantom.fbs")
@@ -61,6 +117,15 @@ add_library(axvphantom SHARED src/axvphantom.cpp)
 add_dependencies(axvphantom axvphantom_flatbuffers_codegen)
 
 target_compile_features(axvphantom PUBLIC cxx_std_23)
+target_compile_definitions(axvphantom
+    PUBLIC
+        AXVP_VERSION_STRING=\"${AXVP_VERSION}\"
+)
+if(TARGET Vulkan::Vulkan)
+    target_compile_definitions(axvphantom PUBLIC AXVP_WITH_VULKAN=1)
+else()
+    target_compile_definitions(axvphantom PUBLIC AXVP_WITH_VULKAN=0)
+endif()
 target_include_directories(axvphantom
     PUBLIC
         $<BUILD_INTERFACE:${AXVP_PUBLIC_INCLUDE_DIR}>
@@ -70,7 +135,14 @@ target_include_directories(axvphantom
     PRIVATE
         ${PROJECT_SOURCE_DIR}/src
 )
-target_link_libraries(axvphantom PUBLIC ${OpenCV_LIBS} flatbuffers::flatbuffers OpenSSL::Crypto)
+target_link_libraries(axvphantom
+    PUBLIC
+        ${OpenCV_LIBS}
+        flatbuffers::flatbuffers
+        OpenSSL::Crypto
+        $<$<TARGET_EXISTS:Vulkan::Vulkan>:Vulkan::Vulkan>
+        axvphantom_cpu_tuning
+)
 
 target_compile_definitions(axvphantom
     PUBLIC
@@ -121,7 +193,9 @@ if(AXVP_BUILD_TESTS AND BUILD_TESTING)
         AXVP_TEST_DATA_DIR="${PROJECT_SOURCE_DIR}/data"
     )
     target_link_libraries(axvphantom_tests PRIVATE axvphantom GTest::gmock_main)
-    gtest_discover_tests(axvphantom_tests)
+    # Keep ASan/LSan builds deterministic by registering tests at configure time
+    # instead of running the binary during discovery.
+    gtest_add_tests(TARGET axvphantom_tests)
 
     add_executable(axvphantom_capi_smoke tests/integration/api/main.c)
     target_compile_features(axvphantom_capi_smoke PRIVATE c_std_99)
@@ -142,6 +216,9 @@ if(AXVP_BUILD_BENCH)
     add_executable(axvphantom_bench tests/bench/main.cpp)
     target_compile_features(axvphantom_bench PRIVATE cxx_std_23)
     target_include_directories(axvphantom_bench PRIVATE ${PROJECT_SOURCE_DIR}/src)
+    target_compile_definitions(axvphantom_bench PRIVATE
+        AXVP_TEST_DATA_DIR="${PROJECT_SOURCE_DIR}/data"
+    )
     target_link_libraries(axvphantom_bench PRIVATE axvphantom)
 endif()
 

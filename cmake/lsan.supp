@@ -1,0 +1,3 @@
+# Known one-time leak from p11-kit locale initialization in the system runtime.
+leak:libp11-kit.so.0
+leak:__newlocale

@@ -131,6 +131,8 @@ class DetectionStage final {
     DetectionStage &operator=(DetectionStage &&) noexcept = default;
     ~DetectionStage() = default;
 
+    void set_policy(axvp_policy_t policy) noexcept { policy_ = policy; }
+
     DetectionStage(std::shared_ptr<const DetectorModel> detector_model,
                    std::shared_ptr<LandmarkBackend> landmark_backend,
                    axvp_policy_t policy,

@@ -64,10 +64,15 @@ int main(void) {
     status = axvp_process_frame(ctx, &frame, &result);
     CHECK(status == AXVP_STATUS_OK);
     CHECK(result.status == AXVP_STATUS_OK);
-    CHECK(result.frame.data == frame.data);
+    CHECK(result.frame.data != frame.data);
     CHECK(result.frame.width == frame.width);
     CHECK(result.frame.height == frame.height);
     CHECK(result.frame.format == frame.format);
+    CHECK(result.metadata != NULL);
+    CHECK(result.metadata_size > 0U);
+    CHECK(result.faces_detected == 0U);
+    CHECK(result.faces_anonymized == 0U);
+    CHECK(result.anonymization_complete == 1U);
 
     axvp_release_result(ctx, &result);
     CHECK(result.size == 0U);

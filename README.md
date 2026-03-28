@@ -1,8 +1,8 @@
 # AXV Phantom SDK
 
 AXV Phantom SDK is a C++23 library for biometric anonymization and liveness verification in video streams.
-This repository currently contains the build scaffold, dependency management, and placeholder targets that
-will evolve into the full pipeline described in the project documentation.
+The repository now contains the implemented SDK pipeline, build tooling, tests, benchmark harness, and
+supporting data bootstrap scripts described in the project documentation.
 
 ## What this repository is for
 
@@ -16,10 +16,12 @@ will evolve into the full pipeline described in the project documentation.
 - `CMake` is configured for `Ninja`.
 - `CTest` is enabled at the build-system level.
 - `GTest` and `GMock` are wired into the unit-test target.
-- `axvphantom_tests` is a GoogleTest suite; `axvphantom_bench` remains a placeholder executable.
+- `axvphantom_tests` is a GoogleTest suite; `axvphantom_bench` is a real latency harness for `axvp_process_frame`.
 - `make lint` checks production sources under `src/` only.
 - `make install` bootstraps Conan dependencies; it does not install the SDK itself.
 - `make install-data` downloads local model assets into `data/`, including the YuNet 2022mar detector, the face-landmark LBF model, and a small face-image pack for detection-stage tests. The directory is ignored by git.
+- Sanitizer presets are available for `asan` and `tsan`; they force the CPU backend in test runs to avoid noisy system-runtime false positives.
+- CMake auto-enables SIMD tuning flags when the compiler and host CPU support them: AVX2/AVX-512 on x86 and dotprod/fp16 on EdgeARM-capable ARM builds.
 
 ## Design goals
 
@@ -37,12 +39,20 @@ make install
 make install-data
 make build
 make test
+make lint
 ```
 
 If you want the optimized build:
 
 ```bash
 make release
+```
+
+For sanitizer validation:
+
+```bash
+ctest --preset asan --output-on-failure
+ctest --preset tsan --output-on-failure
 ```
 
 ## Make targets
@@ -74,8 +84,13 @@ The repository ships with these CMake presets:
 - `relwithdebinfo`
 - `edgearm`
 - `lint`
+- `asan`
+- `tsan`
 
 The `lint` preset uses `clang++` and disables tests and benchmarks so static analysis stays focused on production code.
+The `asan` preset enables AddressSanitizer and UBSan, and the `tsan` preset enables ThreadSanitizer.
+
+The normal build presets also probe the compiler for SIMD flags and pass them through to the SDK target when available.
 
 If no local GoogleTest package is available, CMake fetches the official `googletest` release for the test build.
 
@@ -116,4 +131,5 @@ The main tracked files and directories in this repo are:
 - `CHANGELOG.md`
 - `LICENSE`
 - `VERSION`
+- `cmake/lsan.supp` contains a narrow sanitizer suppression for a known external runtime leak.
 - `data/` is a local cache for downloaded models and face-test images, and is ignored by git.

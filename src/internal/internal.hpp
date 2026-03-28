@@ -1,10 +1,16 @@
 #pragma once
 
+#include "anonymization/anonymization_result.hpp"
+#include "anonymization/anonymization_stage.hpp"
+#include "anonymization/vulkan_context.hpp"
+#include "composer/composer_stage.hpp"
 #include "detection/detection_result.hpp"
 #include "detection/detector_model.hpp"
 #include "detection/detection_stage.hpp"
 #include "error.hpp"
 #include "frame_pool_allocator.hpp"
+#include "liveness/liveness_result.hpp"
+#include "liveness/liveness_stage.hpp"
 #include "scoped_timer.hpp"
 #include "secure_buffer.hpp"
 #include "support.hpp"
