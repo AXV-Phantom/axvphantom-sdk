@@ -27,9 +27,18 @@ include(FetchContent)
 include(GoogleTest)
 
 find_package(OpenCV REQUIRED COMPONENTS core)
+find_package(flatbuffers CONFIG QUIET)
+if(NOT TARGET flatbuffers::flatbuffers)
+    find_path(AXVP_FLATBUFFERS_INCLUDE_DIR NAMES flatbuffers/flatbuffers.h REQUIRED)
+    add_library(flatbuffers::flatbuffers INTERFACE IMPORTED)
+    set_target_properties(flatbuffers::flatbuffers PROPERTIES
+        INTERFACE_INCLUDE_DIRECTORIES "${AXVP_FLATBUFFERS_INCLUDE_DIR}"
+    )
+endif()
 
 set(AXVP_SCHEMA_FILE "${PROJECT_SOURCE_DIR}/schema/axvphantom.fbs")
-set(AXVP_GENERATED_DIR "${CMAKE_CURRENT_BINARY_DIR}/generated")
+set(AXVP_GENERATED_ROOT_DIR "${CMAKE_CURRENT_BINARY_DIR}/generated")
+set(AXVP_GENERATED_DIR "${AXVP_GENERATED_ROOT_DIR}/axvphantom/generated")
 set(AXVP_GENERATED_HEADER "${AXVP_GENERATED_DIR}/axvphantom_generated.h")
 
 find_program(AXVP_FLATC_EXECUTABLE NAMES flatc REQUIRED)
@@ -54,13 +63,13 @@ target_compile_features(axvphantom PUBLIC cxx_std_23)
 target_include_directories(axvphantom
     PUBLIC
         $<BUILD_INTERFACE:${AXVP_PUBLIC_INCLUDE_DIR}>
+        $<BUILD_INTERFACE:${AXVP_GENERATED_ROOT_DIR}>
         $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
         ${OpenCV_INCLUDE_DIRS}
     PRIVATE
-        ${AXVP_GENERATED_DIR}
         ${PROJECT_SOURCE_DIR}/src
 )
-target_link_libraries(axvphantom PUBLIC ${OpenCV_LIBS})
+target_link_libraries(axvphantom PUBLIC ${OpenCV_LIBS} flatbuffers::flatbuffers)
 
 target_compile_definitions(axvphantom
     PUBLIC

@@ -2,6 +2,7 @@
 #define AXVPHANTOM_AXVPHANTOM_HPP
 
 #include "axvphantom.h"
+#include <axvphantom/generated/axvphantom_generated.h>
 
 #include <cstddef>
 #include <cstdint>
@@ -9,6 +10,7 @@
 #include <opencv2/core.hpp>
 #include <span>
 #include <type_traits>
+#include <string_view>
 #include <utility>
 
 inline constexpr axvp_policy_t operator|(axvp_policy_t lhs,
@@ -143,8 +145,31 @@ class MetadataView final {
   public:
     MetadataView() noexcept = default;
 
-    explicit MetadataView(std::span<const std::byte> bytes) noexcept
-        : bytes_(bytes) {}
+    [[nodiscard]] static std::expected<MetadataView, Status>
+    create(std::span<const std::byte> bytes) noexcept {
+        if (bytes.empty()) {
+            return std::unexpected(AXVP_STATUS_INVALID_ARGUMENT);
+        }
+
+        const auto *raw = reinterpret_cast<const std::uint8_t *>(bytes.data());
+        flatbuffers::Verifier verifier(raw, bytes.size());
+        if (!axvp::fb::VerifyFrameMetadataBuffer(verifier)) {
+            return std::unexpected(AXVP_STATUS_INVALID_ARGUMENT);
+        }
+
+        return MetadataView(bytes, axvp::fb::GetFrameMetadata(raw));
+    }
+
+    [[nodiscard]] static std::expected<MetadataView, Status>
+    create(const axvp_result_t &result) noexcept {
+        if (result.metadata == nullptr || result.metadata_size == 0U) {
+            return std::unexpected(AXVP_STATUS_INVALID_ARGUMENT);
+        }
+
+        const auto *bytes =
+            reinterpret_cast<const std::byte *>(result.metadata);
+        return create(std::span<const std::byte>(bytes, result.metadata_size));
+    }
 
     [[nodiscard]] std::span<const std::byte> bytes() const noexcept {
         return bytes_;
@@ -152,8 +177,59 @@ class MetadataView final {
 
     [[nodiscard]] bool empty() const noexcept { return bytes_.empty(); }
 
+    [[nodiscard]] bool valid() const noexcept { return root_ != nullptr; }
+
+    [[nodiscard]] std::uint64_t frame_id() const noexcept {
+        return root_ == nullptr ? 0U : root_->frame_id();
+    }
+
+    [[nodiscard]] std::uint64_t timestamp_ns() const noexcept {
+        return root_ == nullptr ? 0U : root_->timestamp_ns();
+    }
+
+    [[nodiscard]] std::string_view pipeline_version() const noexcept {
+        if (root_ == nullptr || root_->pipeline_version() == nullptr) {
+            return {};
+        }
+
+        const auto *version = root_->pipeline_version();
+        return std::string_view(version->c_str(), version->size());
+    }
+
+    [[nodiscard]] std::span<const axvp::fb::FaceRecord> faces() const noexcept {
+        if (root_ == nullptr || root_->faces() == nullptr) {
+            return {};
+        }
+
+        const auto *faces = root_->faces();
+        return std::span<const axvp::fb::FaceRecord>(
+            reinterpret_cast<const axvp::fb::FaceRecord *>(faces->Data()),
+            static_cast<std::size_t>(faces->size()));
+    }
+
+    [[nodiscard]] std::uint32_t faces_detected() const noexcept {
+        return root_ == nullptr ? 0U : root_->faces_detected();
+    }
+
+    [[nodiscard]] std::uint32_t faces_anonymized() const noexcept {
+        return root_ == nullptr ? 0U : root_->faces_anonymized();
+    }
+
+    [[nodiscard]] bool anonymization_complete() const noexcept {
+        return root_ != nullptr && root_->anonymization_complete();
+    }
+
+    [[nodiscard]] std::uint32_t processing_latency_us() const noexcept {
+        return root_ == nullptr ? 0U : root_->processing_latency_us();
+    }
+
   private:
+    MetadataView(std::span<const std::byte> bytes,
+                 const axvp::fb::FrameMetadata *root) noexcept
+        : bytes_(bytes), root_(root) {}
+
     std::span<const std::byte> bytes_{};
+    const axvp::fb::FrameMetadata *root_ = nullptr;
 };
 
 class Context final {
