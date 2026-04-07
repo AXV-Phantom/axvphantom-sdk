@@ -1,4 +1,4 @@
-# AXV Phantom SDK
+# AXV Phantom SDK - biometric anonymization and liveness verification
 
 AXV Phantom SDK is a C++23 library for biometric anonymization and liveness verification in video streams.
 This repository contains the SDK library, the public C API and C++23 wrapper, build tooling, tests, benchmarks,
